@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, migrar } from './db.js';
 import * as S from './salas.js';
+import { limparApelido, apelidoProibido } from './apelido.js';
 import { FICHAS, RODADAS_OPCOES, RODADAS_PADRAO } from '../public/js/engine.js';
 
 const raiz = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -38,10 +39,6 @@ async function jogadorDoCookie(cookies) {
   return r.rows[0] || null;
 }
 
-function limparApelido(a) {
-  return String(a || '').normalize('NFC').replace(/[^\p{L}\p{N} ._-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 20);
-}
-
 app.get('/api/eu', async (req) => {
   const j = await jogadorDoCookie(req.cookies);
   return {
@@ -54,6 +51,7 @@ app.post('/api/eu', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } }
   const apelido = limparApelido(req.body?.apelido);
   const ficha = String(req.body?.ficha || '');
   if (apelido.length < 2) return reply.code(400).send({ erro: 'O apelido precisa ter de 2 a 20 letras ou números.' });
+  if (apelidoProibido(apelido)) return reply.code(400).send({ erro: 'Esse apelido não pode ser usado. Escolha outro.' });
   if (!FICHAS.some((f) => f.id === ficha)) return reply.code(400).send({ erro: 'Escolha uma das fichas.' });
   const j = await jogadorDoCookie(req.cookies);
   if (j) {
