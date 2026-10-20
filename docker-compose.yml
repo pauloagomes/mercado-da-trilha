@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mercado
+      POSTGRES_USER: mercado
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mercado -d mercado"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://mercado:${POSTGRES_PASSWORD}@postgres:5432/mercado
+      TRILHAHUB_URL: ${TRILHAHUB_URL:-https://trilhahub.cloud}
+      COOKIE_SECURE: ${COOKIE_SECURE:-1}
+      SERVIR_ESTATICOS: "0"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMINIO: ${DOMINIO:?defina DOMINIO no .env}
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./public:/usr/share/nginx/html:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./backups:/backups
+    # Um pg_dump por dia, guardando os últimos 14. Copie a pasta backups/ para fora do servidor.
+    entrypoint: >
+      sh -c 'while true; do
+        pg_dump -h postgres -U mercado -d mercado -Fc -f /backups/mercado-$$(date +%F).dump &&
+        find /backups -name "mercado-*.dump" -mtime +14 -delete;
+        sleep 86400; done'
+
+volumes:
+  pgdata:
