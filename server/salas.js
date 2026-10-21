@@ -707,19 +707,21 @@ export function mestreDoMercado(ws, jog, msg) {
 export async function pedirRevanche(ws, jog) {
   const sala = ws.salaCodigo && salas.get(ws.salaCodigo);
   const p = sala?.jogadores.get(jog.id);
-  if (!p || sala.status !== 'encerrada') return;
+  if (!p) return;
   if (sala.tipo === 'codigo') {
     if (sala.anfitriao !== jog.id) return enviar(ws, { t: 'erro', msg: 'Só o anfitrião reabre a sala.' });
     if (sala.revancheCodigo) return;
+    if (sala.status === 'aberta') await encerrarSala(sala, 'O anfitrião reabriu a sala para a revanche.');
     const nova = await criarSalaCodigo({ id: jog.id, apelido: jog.apelido, ficha: jog.ficha }, sala.rodadas);
     sala.revancheCodigo = nova.codigo;
     for (const s of [...sala.sockets]) {
-      if (s === ws) { await entrarNaSala(ws, jog, nova.codigo); continue; }
-      enviar(s, { t: 'revanche_sala', codigo: nova.codigo, de: jog.apelido });
+      if (s === ws) await entrarNaSala(ws, jog, nova.codigo);
+      enviar(s, { t: 'revanche_sala', codigo: nova.codigo, de: jog.apelido, proprio: s === ws });
     }
     transmitir(sala);
     return;
   }
+  if (sala.status !== 'encerrada') return;
   if (sala.revancheFeita) return enviar(ws, { t: 'erro', msg: 'A revanche desta partida já começou. Entre na fila de novo.' });
   sala.revanche ||= { fim: Date.now() + 20_000, aceitos: new Map() };
   if (!sala.revanche.timer) sala.revanche.timer = setTimeout(() => fecharRevanche(sala), 20_000);

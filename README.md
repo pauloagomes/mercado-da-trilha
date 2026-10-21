@@ -44,7 +44,7 @@ Testes:
 ```bash
 npm test                                                # regras do jogo e simulação de balanceamento
 npm run simular                                         # métricas do RFC com o motor atual (4000 partidas por medida)
-DATABASE_URL=postgres://... npm run test:integracao     # salas no PostgreSQL: guardião, dado duplo, carta de sala, reação
+DATABASE_URL=postgres://... npm run test:integracao     # salas no PostgreSQL: guardião, leilão, votação, patrulhas, revanche, insígnias
 CONTAGEM_FILA_MS=1500 RODADA_MS=1500 npm start          # num terminal
 node test/e2e.mjs                                       # em outro: salas, fila e rodadas sincronizadas
 ```
@@ -129,11 +129,11 @@ As 12 fichas em `public/img/fichas/` são **provisórias**, desenhadas em SVG si
 
 `test/sim.js` joga partidas com o motor e `test/balanceamento.test.js` confere faixas-alvo no `npm test`. O jogador de referência é o do RFC: compra tudo o que cabe, usa o dado duplo com 25 BC ou mais quando falta item e acerta 80% das cartas (50% para os rivais da mesa de 4). Contra o motor antigo (commit 0fc650a) a simulação reproduz o diagnóstico do RFC: 5,8 rodadas sem escolha (RFC: 5,9), 36% de vitória de quem sabe as regras, 95 BC de saldo final.
 
-Cada etapa tem uma faixa mínima (`FAIXAS.etapa`) e o RFC define a meta de lançamento (`FAIXAS.lancamento`); `npm run simular` mostra as duas. Na Etapa 2 o jogo chega a 47% de vitória de quem sabe as regras (meta de lançamento: 44%, atingida) e a 15% de partidas com pagamento recusado (meta: 30% a 50%, ainda não). Os eventos de custo ajudaram (11% para 15%), mas não bastam: a recusa só sobe com mais pressão sobre o saldo (valor do dado duplo, pedágios ou o jogador de referência), uma decisão de design que o RFC não fecha.
+Cada etapa tem uma faixa mínima (`FAIXAS.etapa`) e o RFC define a meta de lançamento (`FAIXAS.lancamento`); `npm run simular` mostra as duas. Na Etapa 3 o jogo chega a 49% de vitória de quem sabe as regras (meta de lançamento: 44%, atingida), 0% de cartas repetidas em 3 partidas seguidas (meta: 15%, atingida), 0,2% de partidas sem comemoração (meta: 0%; a tela de resultado ainda comemora toda partida) e 16% de partidas com pagamento recusado (meta: 30% a 50%, ainda não). Os eventos de custo ajudaram (11% para 15%), mas não bastam: a recusa só sobe com mais pressão sobre o saldo (valor do dado duplo, pedágios ou o jogador de referência), uma decisão de design que o RFC não fecha.
 
 ## Próximos passos
 
 - Trocar as fichas provisórias pelas artes finais.
 - Confirmar o destino de `TRILHAHUB_URL`.
 - Quadro de recordes, com e-mail do responsável confirmado por código (está desenhado no plano, ainda não foi implementado).
-- Etapa 3 do RFC: motivos para voltar (insígnias, desafio do dia, Minha trilha, revanche), patrulhas, rivais virtuais no jogo sozinho, Mestre do mercado e o baralho de 36 cartas.
+- Etapa 4 do RFC: troca de itens (A7), texto curto das cartas para Lobinhos (F5), missão da sala (F6), quadro de recordes com e-mail do responsável confirmado por código, código de recuperação de 6 palavras e a medição de uso (incluindo um contador anônimo do jogo sozinho). Depois, a Etapa 5: fichas finais, revisão das 36 cartas contra a carteira real, teste com uma tropa e ajuste do balanceamento.

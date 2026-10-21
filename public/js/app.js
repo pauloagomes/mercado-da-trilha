@@ -2,6 +2,7 @@
 // Jogar sozinho usa o motor (engine.js) direto no navegador.
 // Nas salas, o servidor é a fonte da verdade: o celular só envia jogadas e desenha o estado recebido.
 import * as E from './engine.js';
+import * as R from './rivais.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const app = $('#app');
@@ -35,6 +36,19 @@ const DICAS = [
   'Acertou uma carta de Tempestade? Você evita o revés.',
 ];
 
+// ---------- Dia, identificador, insígnias e fila de envio ----------
+// O dia do desafio é o dia civil de São Paulo (toISOString viraria "amanhã" das 21h à meia-noite).
+const diaSP = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
+  : '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (c) => (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16)));
+const ORDEM = { eu: 0, r1: 1, r2: 2, r3: 3 };
+const GLIFOS = { contador: '✓', kit8: '8', poupador: 'P', guardiao: 'G', semrecusa: '0', fogueiro: 'F', cofre: '$', leiloeiro: 'C', equipado: 'E', missao: '★', dados: '2', campeao: '1' };
+const COR_SELO = ['partida', 'agencia', 'util', 'exp', 'enf', 'pedagio', 'bussola', 'tempestade', 'perdido', 'fogo'];
+const seloHtml = (id, off = false) => {
+  const i = E.INSIGNIAS.find((x) => x.id === id); if (!i) return '';
+  return `<span class="selo${off ? ' off' : ''}" style="--c:var(--c-${COR_SELO[E.INSIGNIAS.indexOf(i) % COR_SELO.length]})" title="${esc(i.nome)}: ${esc(i.desc)}" aria-label="${esc(i.nome)}">${GLIFOS[id]}</span>`;
+};
+
 const S = {
   tela: 'entrada',
   perfil: ls.get('mt-perfil', { apelido: '', ficha: 'f01' }),
@@ -48,6 +62,8 @@ const S = {
   cenasN: null,          // última cena já mostrada (null = ainda não sei, não anime o passado)
   soloN: 0, peaoPos: {}, // peaoPos: ordem -> casa onde o peão está desenhado
   som: ls.get('mt-som', true), reacaoLivreEm: 0,
+  insignias: Object.keys(ls.get('mt-insignias', {})),   // todas as que o jogador já ganhou (aparelho + servidor)
+  resultado: null, trilha: null, ranking: null, soloSala: false,
   setas: {}, delta: {},  // C5: quem subiu ou desceu no placar e os pontos ganhos na última jogada
 };
 
@@ -129,7 +145,10 @@ async function iniciar() {
     if (r.jogador) {
       S.registrado = true;
       if (!S.perfil.apelido) S.perfil = { ...r.jogador };
+      mesclarInsignias(r.insignias || []);
     }
+    enviarPendentes();
+    carregarRanking();
     const sala = ls.get('mt-sala', null);
     if (sala && S.registrado) { S.modo = 'sala'; S.tela = 'jogo'; S.cenasN = null; await conectar(); enviar({ t: 'entrar', codigo: sala }); }
   } catch { S.online = false; }
@@ -179,7 +198,7 @@ function receber(m) {
     empilhar(m);
   } else if (m.t === 'partida') {
     S.modo = 'sala'; ls.set('mt-sala', m.codigo); S.fila = null; S.cenasN = null; S.eu = null; S.peaoPos = {};
-    if (S.tela !== 'resultado') S.tela = 'jogo';
+    if (S.tela !== 'resultado' || m.nova) { S.tela = 'jogo'; S.verTab = false; S.resultado = null; S.confetou = false; S.setas = {}; S.delta = {}; S.placar = []; }
   } else if (m.t === 'fila') {
     S.fila = m; S.offset = m.agora - Date.now();
     if (S.tela === 'fila') render();
@@ -191,6 +210,9 @@ function receber(m) {
     if (/não encontrada|encerrada|já começou/.test(m.msg) && S.tela !== 'resultado') { ls.del('mt-sala'); S.modo = null; ir('entrada'); }
   } else if (m.t === 'reacao') {
     mostrarReacao(m);
+  } else if (m.t === 'revanche_sala') {
+    if (!m.proprio) toast(`${m.de} reabriu a sala: vamos de revanche!`);
+    entrarNaRevanche(m.codigo);
   }
 }
 
@@ -218,7 +240,7 @@ async function aplicar(m, animar) {
   const novas = (m.cenas || []).filter((c) => S.cenasN != null && c.n > S.cenasN);
   if (m.cenas?.length) S.cenasN = Math.max(S.cenasN ?? 0, ...m.cenas.map((c) => c.n));
   else if (S.cenasN == null) S.cenasN = 0;
-  if (animar && novas.length && novas.length <= 4 && S.tela === 'jogo' && $('#board')) {
+  if (animar && novas.length && novas.length <= (S.modo === 'solo' ? 12 : 4) && S.tela === 'jogo' && $('#board')) {
     S.cenaEmCurso = true;
     try { for (const c of novas) await animarCena(c, m); } finally { S.cenaEmCurso = false; }
   } else if (novas.length) {
@@ -240,7 +262,7 @@ async function aplicar(m, animar) {
 // C5: setas de subida e descida, "+N pts" da última jogada e aviso de "Virada!" quando o líder muda.
 function atualizarRanking(novo) {
   const ant = S.placar;
-  if (S.modo !== 'sala' || !ant.length || ant.length !== novo.length) { S.setas = {}; S.delta = {}; return; }
+  if (!ant.length || ant.length !== novo.length || novo.length < 2) { S.setas = {}; S.delta = {}; return; }
   const rank = (l) => Object.fromEntries(l.map((p, i) => [p.ordem, i]));
   const ra = rank(ant), rn = rank(novo);
   let mexeu = false;
@@ -521,15 +543,77 @@ function mostrarReacao(m) {
   atualizarMural();
 }
 
-// ---------- Ações ----------
+// ---------- Insígnias, histórico e envio dos resultados ----------
+function mesclarInsignias(ids) {
+  const locais = ls.get('mt-insignias', {});
+  for (const id of ids) if (!locais[id]) locais[id] = new Date().toISOString();
+  ls.set('mt-insignias', locais);
+  S.insignias = [...new Set([...S.insignias, ...ids])];
+}
+
+// O jogo sozinho funciona sem internet: o resultado fica numa fila no aparelho e sobe quando der.
+let enviando = false;
+async function enviarPendentes() {
+  const fila = ls.get('mt-envios', []);
+  if (enviando || !fila.length || !S.online) return;
+  enviando = true;
+  try {
+    if (!S.registrado) await registrar();
+    const resto = [];
+    for (const it of fila) {
+      try {
+        const r = await fetch(it.tipo === 'solo' ? '/api/solo' : '/api/desafio', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(it.corpo) });
+        if (r.status >= 500) resto.push(it);
+        else if (r.ok) { const j = await r.json().catch(() => ({})); if (j.insignias) mesclarInsignias(j.insignias); if (it.tipo === 'desafio' && S.resultado) S.resultado.valeu = j.valeu; }
+      } catch { resto.push(it); }
+    }
+    ls.set('mt-envios', resto);
+  } catch { /* sem apelido ou sem rede: fica na fila */ } finally { enviando = false; }
+}
+addEventListener('online', () => { S.online = true; enviarPendentes(); });
+
+async function carregarRanking() {
+  if (!S.online) return;
+  try { S.ranking = await api(`/api/desafio/ranking?dia=${diaSP()}`); if (S.tela === 'entrada' || S.tela === 'resultado') render(); } catch { /* sem placar do dia */ }
+}
+
+// ---------- Jogo sozinho (com rivais) e desafio do dia ----------
 const COR_SOLO = '#D69712';
+const corDe = (id) => (id === 'eu' ? COR_SOLO : R.RIVAIS.find((r) => r.id === id).cor);
+
+// Cada jogador do contexto guarda o que aconteceu na jogada; aqui vira uma "cena" por jogador, como no servidor.
+function coletarCenas(ctx) {
+  const cenas = [];
+  for (const [id, st] of ctx.estados) {
+    const cena = E.esvaziarCena(st);
+    st.saida = [];
+    if (cena.length) cenas.push({ n: ++S.soloN, ordem: ORDEM[id], cena });
+  }
+  return cenas;
+}
+
+function salvarSolo() {
+  const { modo, uuid: id, dia, acoes, treino, ctx } = S.solo;
+  ls.set('mt-solo', { v: E.VERSAO_ESTADO, modo, uuid: id, dia, acoes, treino, pontes: ctx.pontes, estados: Object.fromEntries(ctx.estados) });
+}
+function carregarSolo() {
+  const d = ls.get('mt-solo', null);
+  if (!d || d.v !== E.VERSAO_ESTADO || !d.estados?.eu) { ls.del('mt-solo'); return null; }
+  const ctx = E.novoContexto(d.modo === 'solo' ? d.pontes || {} : null);
+  for (const [id, st] of Object.entries(d.estados)) { st.saida = []; st.cena = []; ctx.estados.set(id, st); }
+  return { modo: d.modo, uuid: d.uuid, dia: d.dia, acoes: d.acoes || [], treino: !!d.treino, ctx };
+}
 
 // No jogo sozinho o motor roda aqui; a tela recebe uma cópia, no mesmo formato que o servidor manda.
-function publicarSolo(cena = []) {
-  const st = S.solo, snap = structuredClone(E.visaoPropria(st));
+function publicarSolo(cenas = []) {
+  const { ctx } = S.solo, st = ctx.estados.get('eu');
+  const snap = structuredClone(E.visaoPropria(st));
   snap.cor = COR_SOLO; snap.ordem = 0;
-  empilhar({ t: 'estado', sala: null, eu: snap, placar: [{ ...E.resumoPublico(st), cor: COR_SOLO, ordem: 0, eu: true }],
-    mural: [], pontes: {}, cenas: [{ n: ++S.soloN, ordem: 0, cena }] });
+  if (snap.pend?.guardiao) snap.pend = { ...snap.pend, guardiaoApelido: ctx.estados.get(snap.pend.guardiao)?.apelido || null, guardiao: undefined };
+  const placar = [...ctx.estados].map(([id, s]) => ({ ...E.resumoPublico(s), cor: corDe(id), ordem: ORDEM[id], eu: id === 'eu', patrulha: null, insignias: [] })).sort(E.compararPlacar);
+  const pontes = {};
+  for (const [pos, id] of Object.entries(ctx.pontes || {})) pontes[pos] = ORDEM[id];
+  empilhar({ t: 'estado', sala: null, eu: snap, placar, mural: [], pontes, cenas });
 }
 
 function acao(t, extra = {}) {
@@ -540,40 +624,72 @@ function acao(t, extra = {}) {
     enviar({ t, ...extra });
     return;
   }
-  const st = S.solo, ctx = E.novoContexto(null);
-  ctx.estados.set(0, st);
-  E.esvaziarCena(st);
-  const r = E.agirNaSala(ctx, 0, { t, ...extra });
-  st.saida = [];
-  if (r.erro) { E.esvaziarCena(st); if (st.pend?.tipo === 'loja') S.erro = r.erro; else toast(r.erro); atualizarJogo(); return; }
-  S.erro = '';
-  let cena = E.esvaziarCena(st);
-  if (st.feito) { E.fecharRodada(st); E.passarRodadasPerdidas(st); cena = cena.concat(E.esvaziarCena(st)); }
-  if (!st.pend) S.carrinho = {};
-  ls.set('mt-solo', st);
-  if (st.fim) {
-    const pts = E.pontuacao(st).total, rec = ls.get('mt-recorde', null);
-    S.novoRecorde = !rec || pts > rec.pontos;
-    if (S.novoRecorde) ls.set('mt-recorde', { pontos: pts, em: Date.now() });
-    ls.del('mt-solo');
+  const { ctx, modo } = S.solo, st = ctx.estados.get('eu'), msg = { t, ...extra };
+  for (const x of ctx.estados.values()) E.esvaziarCena(x);
+  const r = modo === 'desafio' ? E.passoDoDesafio(ctx, msg) : E.agirNaSala(ctx, 'eu', msg);
+  if (r.erro) {
+    for (const x of ctx.estados.values()) E.esvaziarCena(x);
+    if (st.pend?.tipo === 'loja') S.erro = r.erro; else toast(r.erro);
+    atualizarJogo(); return;
   }
+  S.erro = '';
+  let cenas = coletarCenas(ctx);
+  if (modo === 'desafio') S.solo.acoes.push(msg);
+  else if (st.feito) {
+    // A rodada do jogador acabou: ela fecha, as perdidas passam sozinhas e os rivais jogam a deles.
+    E.fecharRodada(st); E.passarRodadasPerdidas(st); cenas.push(...coletarCenas(ctx));
+    R.rivaisJogam(ctx, Math.random); cenas.push(...coletarCenas(ctx));
+  }
+  if (!st.pend) S.carrinho = {};
+  salvarSolo();
+  if (st.fim) finalizarSolo();
   S.aguardando = true; atualizarPainel();
-  publicarSolo(cena);
+  publicarSolo(cenas);
 }
 
-async function jogarSozinho(continuar) {
+// Fim da partida do jogo sozinho ou do desafio: recorde, insígnias, histórico e envio.
+function finalizarSolo() {
+  const { ctx, modo, uuid: id, dia, acoes, treino } = S.solo, st = ctx.estados.get('eu');
+  const mesa = [...ctx.estados].map(([k, x]) => ({ k, ...E.resumoPublico(x) })).sort(E.compararPlacar);
+  const pos = modo === 'solo' ? mesa.findIndex((x) => x.k === 'eu') + 1 : 0;
+  const novas = E.insigniasDaPartida(st, { pos, total: modo === 'solo' ? mesa.length : 1 });
+  const pts = E.pontuacao(st).total;
+  S.resultado = { modo, pos, novas, pontos: pts, treino, dia, valeu: null };
+  mesclarInsignias(novas);
+  const chave = modo === 'desafio' ? 'mt-recorde-desafio' : 'mt-recorde', rec = ls.get(chave, null);
+  S.novoRecorde = !rec || pts > rec.pontos;
+  if (S.novoRecorde) ls.set(chave, { pontos: pts, em: Date.now() });
+  ls.set('mt-historico', [{ modo, pontos: pts, saldo: st.saldo, quando: new Date().toISOString() }, ...ls.get('mt-historico', [])].slice(0, 20));
+  ls.set('mt-vistas', [...ls.get('mt-vistas', []), ...st.sacadas].slice(-24));
+  ls.del('mt-solo');
+  const fila = ls.get('mt-envios', []);
+  if (modo === 'solo') fila.push({ tipo: 'solo', corpo: { id, pontos: pts, saldo: st.saldo, acertos: st.acertos, kit: st.kit.length, rodadas: st.rodadas, posicao: pos, insignias: novas } });
+  else if (!treino) { ls.set(`mt-desafio-${dia}`, { pontos: pts }); fila.push({ tipo: 'desafio', corpo: { dia, acoes } }); }
+  ls.set('mt-envios', fila);
+  enviarPendentes().then(() => { if (modo === 'desafio') carregarRanking(); });
+}
+
+async function jogarSozinho(continuar, modo = 'solo') {
   try { await registrarLocal(); } catch (e) { toast(e.message); return; }
   S.modo = 'solo';
-  let salvo = continuar ? ls.get('mt-solo', null) : null;
-  if (salvo && salvo.v !== E.VERSAO_ESTADO) { ls.del('mt-solo'); salvo = null; toast('O jogo foi atualizado: a partida salva foi descartada.'); }
-  S.solo = salvo || E.novoJogador({ apelido: S.perfil.apelido.trim(), ficha: S.perfil.ficha, rodadas: S.rodadas, seed: Math.floor(Math.random() * 2 ** 31) });
-  S.solo.saida = []; S.solo.cena = [];
-  ls.set('mt-solo', S.solo);
-  S.cenasN = null; S.aguardando = false; S.peaoPos = {}; pendentes.length = 0;
+  let salvo = continuar ? carregarSolo() : null;
+  if (continuar && !salvo) toast('O jogo foi atualizado: a partida salva foi descartada.');
+  if (!salvo) {
+    const apelido = S.perfil.apelido.trim(), ficha = S.perfil.ficha;
+    if (modo === 'desafio') {
+      const dia = diaSP();
+      salvo = { modo, uuid: uuid(), dia, acoes: [], treino: !!ls.get(`mt-desafio-${dia}`, null), ctx: E.novoDesafio(dia, { apelido, ficha }) };
+    } else {
+      salvo = { modo, uuid: uuid(), acoes: [], ctx: R.novoJogoSolo({ apelido, ficha, rodadas: S.rodadas, seed: Math.floor(Math.random() * 2 ** 31), vistas: ls.get('mt-vistas', []) }) };
+    }
+  }
+  S.solo = salvo; salvarSolo();
+  S.cenasN = null; S.aguardando = false; S.peaoPos = {}; S.resultado = null; S.confetou = false; S.setas = {}; S.delta = {}; S.placar = []; pendentes.length = 0;
   S.eu = null;
   publicarSolo();
   ir('jogo');
 }
+const jogarDesafio = () => jogarSozinho(false, 'desafio');
 async function registrarLocal() {
   const a = S.perfil.apelido.trim();
   if (a.length < 2) throw new Error('Escreva um apelido com pelo menos 2 letras.');
@@ -592,6 +708,13 @@ async function entrarComCodigo(codigo) {
   if (!/^[A-Z0-9]{5}$/.test(codigo)) { toast('O código tem 5 letras ou números.'); return; }
   try { await preparoOnline(); } catch (e) { toast(e.message); return; }
   S.modo = 'sala'; ls.set('mt-sala', codigo); S.cenasN = null; S.peaoPos = {}; S.eu = null;
+  enviar({ t: 'entrar', codigo });
+}
+// E4: o anfitrião reabriu a sala com código; todos os que estavam no resultado são levados juntos.
+function entrarNaRevanche(codigo) {
+  S.modo = 'sala'; ls.set('mt-sala', codigo); S.cenasN = null; S.peaoPos = {}; S.eu = null; S.placar = [];
+  S.verTab = false; S.resultado = null; S.setas = {}; S.delta = {};
+  S.tela = 'jogo'; render();
   enviar({ t: 'entrar', codigo });
 }
 async function criarSala() {
@@ -660,7 +783,10 @@ function topo(extra = '') {
 }
 
 function telaEntrada() {
-  const p = S.perfil, salvo = ls.get('mt-solo', null), rec = ls.get('mt-recorde', null);
+  const p = S.perfil, bruto = ls.get('mt-solo', null), rec = ls.get('mt-recorde', null);
+  const salvo = bruto && bruto.v === E.VERSAO_ESTADO && bruto.estados?.eu && !bruto.estados.eu.fim ? bruto : null;
+  const dia = diaSP(), jogouHoje = ls.get(`mt-desafio-${dia}`, null) || S.ranking?.jogou;
+  const top = S.ranking?.top?.slice(0, 3) || [];
   const casas = [
     ['partida', 'Ao passar, +30 BC de mesada.'], ['agencia', 'Depósito de 40 BC, se a conta não passar de 300 BC.'],
     ['util', 'Corda, lona e panela.'], ['exp', 'Mapa, bússola e lanterna.'], ['enf', 'Kit primeiros socorros.'],
@@ -685,9 +811,12 @@ function telaEntrada() {
       <label class="f" style="max-width:340px">Duração (jogo sozinho e sala com código)<select id="rodadas">${E.RODADAS_OPCOES.map((n) => `<option value="${n}" ${n === S.rodadas ? 'selected' : ''}>${n} rodadas${n === E.RODADAS_PADRAO ? ' (padrão)' : ''}</option>`).join('')}</select></label>
     </div>
     <div class="modos">
-      <div class="modo" style="--t:var(--c-util)"><h3>Jogar sozinho</h3><p class="note">Na hora, sem sala. Funciona mesmo sem internet depois de aberto.</p>
+      <div class="modo" style="--t:var(--c-util)"><h3>Jogar sozinho</h3><p class="note">Contra 3 rivais virtuais, na hora. Funciona mesmo sem internet depois de aberto.</p>
         <button class="btn big primary" id="solo">Jogar sozinho</button>
-        ${salvo && !salvo.fim ? `<button class="btn" id="continuar">Continuar partida (rodada ${E.rodadaAtual(salvo)} de ${salvo.rodadas})</button>` : ''}</div>
+        ${salvo ? `<button class="btn" id="continuar" data-modo="${salvo.modo}">${salvo.modo === 'desafio' ? 'Continuar o desafio do dia' : `Continuar partida (rodada ${E.rodadaAtual(salvo.estados.eu)} de ${salvo.estados.eu.rodadas})`}</button>` : ''}</div>
+      <div class="modo" style="--t:var(--c-agencia)"><h3>Desafio do dia</h3><p class="note">A mesma partida para todo mundo hoje (${dia.split('-').reverse().join('/')}). A primeira tentativa vale para o placar do dia.</p>
+        <button class="btn big primary" id="desafio">${jogouHoje ? 'Treinar o desafio de hoje' : 'Jogar o desafio de hoje'}</button>
+        ${top.length ? `<p class="note">Placar de hoje: ${top.map((x, i) => `${i + 1}º ${esc(x.apelido)} (${x.pontos})`).join(' · ')}</p>` : ''}</div>
       <div class="modo" style="--t:var(--c-bussola)"><h3>Entrar com código</h3><p class="note">Alguém criou a sala e passou o código de 5 letras.</p>
         <div class="row"><input type="text" id="codigo" maxlength="5" placeholder="Código" style="text-transform:uppercase;flex:1;min-width:7em" autocapitalize="characters" ${S.online ? '' : 'disabled'}><button class="btn primary" id="entrarCod" ${S.online ? '' : 'disabled'}>Entrar</button></div>
         <button class="btn sm" id="criar" ${S.online ? '' : 'disabled'}>Criar uma sala e receber o código</button></div>
@@ -696,6 +825,7 @@ function telaEntrada() {
     </div>
     ${S.online ? '' : '<p class="note">Sem conexão com o servidor: as salas ficam indisponíveis, mas você pode jogar sozinho.</p>'}
     ${rec ? `<p class="note">Seu recorde jogando sozinho: <b>${rec.pontos} pts</b>.</p>` : ''}
+    <div class="row minhas"><b>Minhas insígnias</b> ${S.insignias.length ? S.insignias.slice(0, 12).map((i) => seloHtml(i)).join('') : '<span class="note">Nenhuma ainda: jogue uma partida até o fim.</span>'}<button class="btn sm" id="trilha">Minha trilha</button></div>
     <details><summary>Como funciona cada casa</summary>
       <div class="casas">${casas.map(([k, t]) => `<div class="casa-info" style="--t:var(--c-${k})">${ic(k)}<b>${E.CASAS[k].nome}</b><span>${t}</span></div>`).join('')}</div>
       <p class="note" style="margin-top:10px">Pontos: 10 por item do kit, +20 pelo kit completo, +10 por carta acertada, 1 pt a cada 10 BC que sobrarem, o bônus da meta secreta e o Canivete do leilão. A cada 3 rodadas há um evento, anunciado antes; cada item do kit protege de um revés, e nas últimas rodadas créditos e cartas certas valem em dobro. Antes de rolar, você escolhe: rolar de graça, pagar 5 BC pelo dado duplo ou ajudar no acampamento e ganhar 15 BC. Acertar uma carta de Tempestade evita o revés. Desempate: saldo final, depois cartas acertadas.</p>
@@ -713,12 +843,41 @@ function ligarEntrada() {
   }));
   $('#rodadas').addEventListener('change', (e) => { S.rodadas = Number(e.target.value); });
   $('#solo').addEventListener('click', () => jogarSozinho(false));
-  $('#continuar')?.addEventListener('click', () => jogarSozinho(true));
+  $('#continuar')?.addEventListener('click', (e) => jogarSozinho(true, e.currentTarget.dataset.modo));
+  $('#desafio').addEventListener('click', jogarDesafio);
+  $('#trilha').addEventListener('click', abrirTrilha);
   $('#entrarCod').addEventListener('click', () => entrarComCodigo($('#codigo').value));
   $('#codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrarComCodigo(e.target.value); });
   $('#criar').addEventListener('click', criarSala);
   $('#fila').addEventListener('click', entrarNaFila);
 }
+
+// ---------- Minha trilha (E3) ----------
+const MODOS = { solo: 'Sozinho', desafio: 'Desafio do dia', espera: 'Sala de espera', codigo: 'Sala com código' };
+async function abrirTrilha() {
+  S.trilha = null; ir('trilha');
+  try {
+    S.trilha = await api('/api/minha-trilha');
+    mesclarInsignias(S.trilha.insignias.map((i) => i.id));
+  } catch {
+    // sem rede ou sem apelido no servidor: mostra o que está guardado no aparelho
+    S.trilha = { offline: true, partidas: ls.get('mt-historico', []),
+      recordes: { solo: ls.get('mt-recorde', null)?.pontos, desafio: ls.get('mt-recorde-desafio', null)?.pontos }, insignias: [] };
+  }
+  render();
+}
+function telaTrilha() {
+  const t = S.trilha, ganhas = new Set(S.insignias);
+  const corpo = !t ? '<p class="muted">Carregando…</p>' : `
+    <div class="box"><div class="eyebrow">Recordes</div><div class="recordes">${Object.entries(MODOS).map(([k, nome]) => `<div class="recorde-c"><span class="note">${nome}</span><b>${t.recordes?.[k] != null ? `${t.recordes[k]} pts` : '—'}</b></div>`).join('')}</div></div>
+    <div class="box"><div class="eyebrow">Insígnias · ${E.INSIGNIAS.filter((i) => ganhas.has(i.id)).length} de ${E.INSIGNIAS.length}</div>
+      <div class="insignias">${E.INSIGNIAS.map((i) => `<div class="insignia${ganhas.has(i.id) ? '' : ' off'}">${seloHtml(i.id, !ganhas.has(i.id))}<div><b>${esc(i.nome)}</b><span class="note">${esc(i.desc)}</span></div></div>`).join('')}</div></div>
+    <div class="box"><div class="eyebrow">Últimas partidas</div>${t.partidas.length ? `<table class="extrato">${t.partidas.map((p) => `<tr><td>${MODOS[p.modo] || p.modo}</td><td class="v">${p.pontos} pts</td><td class="v muted">${p.saldo} BC</td><td class="v muted">${new Date(p.quando).toLocaleDateString('pt-BR')}</td></tr>`).join('')}</table>` : '<p class="note">Nenhuma partida terminada ainda.</p>'}
+      ${t.offline ? '<p class="note">Sem conexão: mostrando só o que está neste aparelho.</p>' : ''}</div>`;
+  return `${topo(`<span class="chip">Minha trilha</span><span class="sp"></span>${botaoSom()}<button class="btn sm" id="voltarTrilha">Voltar</button>`)}
+  <div class="wrap trilha stack">${corpo}</div>`;
+}
+function ligarTrilha() { $('#voltarTrilha')?.addEventListener('click', () => { S.trilha = null; ir('entrada'); }); }
 
 function telaFila() {
   const f = S.fila, js = f?.jogadores || [], max = f?.max || 8;
@@ -883,8 +1042,14 @@ function placarHtml() {
   const agora = Date.now();
   return `<div class="placar">${S.placar.map((p, i) => {
     const seta = S.setas[p.ordem], d = S.delta[p.ordem];
-    return `<div class="pl${p.eu ? ' eu' : ''}" style="--pc:${p.cor}"><span class="pos">${i + 1}${seta ? `<span class="seta ${seta}" aria-label="${seta === 'up' ? 'subiu' : 'desceu'}">${seta === 'up' ? '▲' : '▼'}</span>` : ''}</span><img src="${fichaSrc(p.ficha)}" alt="${esc(fichaNome(p.ficha))}"><div><div class="nm">${esc(p.apelido)}${p.eu ? ' (você)' : ''}</div><div class="meta">Kit ${p.kit}/7 · rodada ${Math.min(p.rodada + (p.fim ? 0 : 1), S.sala?.rodadas || 12)}${p.fim ? ' · terminou' : ''}${S.sala?.tipo === 'espera' && p.feito && !p.fim ? ' · pronto' : ''} · ${p.saldo} BC</div></div><span class="pts">${d && d.ate > agora ? `<span class="delta">+${d.v}</span>` : ''}${p.pontos} pts</span></div>`;
+    return `<div class="pl${p.eu ? ' eu' : ''}" style="--pc:${p.cor}"><span class="pos">${i + 1}${seta ? `<span class="seta ${seta}" aria-label="${seta === 'up' ? 'subiu' : 'desceu'}">${seta === 'up' ? '▲' : '▼'}</span>` : ''}</span><img src="${fichaSrc(p.ficha)}" alt="${esc(fichaNome(p.ficha))}"><div><div class="nm">${esc(p.apelido)}${p.eu ? ' (você)' : ''} ${(p.insignias || []).slice(0, 3).map((i) => seloHtml(i)).join('')}</div><div class="meta">${p.patrulha != null ? `${esc(S.sala?.patrulhas?.find((x) => x.n === p.patrulha)?.nome || '')} · ` : ''}Kit ${p.kit}/7 · rodada ${Math.min(p.rodada + (p.fim ? 0 : 1), eu()?.rodadas || 12)}${p.fim ? ' · terminou' : ''}${S.sala?.tipo === 'espera' && p.feito && !p.fim ? ' · pronto' : ''} · ${p.saldo} BC</div></div><span class="pts">${d && d.ate > agora ? `<span class="delta">+${d.v}</span>` : ''}${p.pontos} pts</span></div>`;
   }).join('')}</div>`;
+}
+
+function patrulhasHtml() {
+  const ps = S.sala?.patrulhas;
+  if (!ps) return '';
+  return `<div class="eyebrow">Patrulhas · média de pontos</div><div class="placar">${ps.map((x, i) => `<div class="pl"><span class="pos">${i + 1}</span><b>${esc(x.nome)}</b><span class="note">${x.membros} jogador(es)</span><span class="pts">${x.media} pts</span></div>`).join('')}</div>`;
 }
 
 function anfitriao() {
@@ -893,6 +1058,8 @@ function anfitriao() {
   return `<div class="painel anfitriao" style="--t:var(--c-bussola)"><div class="tag">Painel do anfitrião</div>
     <div class="row" style="justify-content:space-between"><span class="codigo">${esc(s.codigo)}</span><button class="btn sm" id="copiar">Copiar código</button></div>
     <p class="note">Mande este código pelo grupo. ${s.jogando} jogando, ${s.terminaram} terminaram, ${s.total} de ${s.max} na sala.</p>
+    ${s.status === 'aberta' ? `<div class="mestre"><div class="eyebrow">Mestre do mercado</div><div class="row">${E.MESTRE_EVENTOS.map((t) => `<button class="btn sm" data-mestre="${t}">${E.EVENTOS[t].nome}</button>`).join('')}</div><p class="note">Chama o evento para a sala toda agora, na rodada em que cada um estiver.</p></div>
+    <div class="mestre"><div class="eyebrow">Patrulhas</div><div class="row"><select id="nPatrulhas" aria-label="Número de patrulhas">${[2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${n === (S.nPatrulhas || 2) ? 'selected' : ''}>${n} patrulhas</option>`).join('')}</select><button class="btn sm" id="sortear">${s.patrulhas ? 'Sortear de novo' : 'Sortear'}</button></div><p class="note">O sistema sorteia quem fica em cada uma. O placar mostra a média de pontos por patrulha.</p></div>` : ''}
     ${s.podeLeilao ? `<div class="row"><button class="btn sm" id="abrirLeilao">Abrir o leilão do Canivete</button></div><p class="note">Todos dão um lance fechado por 10 s; o Canivete vale +${E.CANIVETE_PTS} pts. Só uma vez por sala.</p>` : ''}
     ${s.status === 'aberta' ? `<div class="row"><button class="btn sm danger" id="encerrar">${S.confirmarEncerrar ? 'Confirmar: encerrar a sala' : 'Encerrar sala'}</button>${S.confirmarEncerrar ? '<button class="btn sm" id="cancelarEnc">Cancelar</button>' : ''}</div>` : '<p class="note">Sala encerrada.</p>'}
     <div class="promo"><b>Leve o Trilha HUB para o seu grupo</b><span class="note">A carteira de evento de verdade: recarga por Pix, pagamento por QR ou pulseira e avisos de gasto no WhatsApp dos responsáveis.</span>${linkHub('anfitriao', 'Ver como funciona')}</div></div>`;
@@ -913,15 +1080,16 @@ function reacoesHtml() {
 }
 
 function montarJogo() {
-  const sala = S.modo === 'sala';
+  const sala = S.modo === 'sala', contraRivais = S.modo === 'solo' && S.solo?.modo === 'solo';
   return `<div id="topo-jogo"></div>
   <div class="wrap jogo">
     <div class="j-main">
       <div class="boardbox">${montarTabuleiro()}${sala ? reacoesHtml() : ''}</div>
       <div class="side"><div id="painel"></div><div id="conta-box"></div></div>
     </div>
-    ${sala ? `<div class="dois"><div class="stack"><div class="eyebrow">Placar da sala</div><div id="placar"></div><div id="anfitriao"></div></div>
+    ${sala ? `<div class="dois"><div class="stack"><div class="eyebrow">Placar da sala</div><div id="placar"></div><div id="patrulhas"></div><div id="anfitriao"></div></div>
       <div class="stack"><div class="eyebrow">Mural</div><ul class="mural" id="mural"></ul></div></div>` : ''}
+    ${contraRivais ? '<div class="stack"><div class="eyebrow">Placar contra os rivais</div><div id="placar"></div></div>' : ''}
   </div>`;
 }
 
@@ -966,8 +1134,8 @@ function atualizarJogo() {
   $('#conta-box').innerHTML = conta(st, cor);
   atualizarPainel();
   if (S.modo === 'sala') {
-    atualizarPlacar(); $('#anfitriao').innerHTML = anfitriao(); atualizarMural(); ligarAnfitriao();
-  }
+    atualizarPlacar(); $('#patrulhas').innerHTML = patrulhasHtml(); $('#anfitriao').innerHTML = anfitriao(); atualizarMural(); ligarAnfitriao();
+  } else atualizarPlacar();
   atualizarCasas(st); atualizarCentro(st); atualizarPontes();
   if (nova || !S.cenaEmCurso) sincronizarPeoes(S.placar);
   tique();
@@ -1008,6 +1176,9 @@ function ligarPainel() {
 }
 
 function ligarAnfitriao() {
+  app.querySelectorAll('[data-mestre]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'mestre', tipo: b.dataset.mestre })));
+  $('#nPatrulhas')?.addEventListener('change', (e) => { S.nPatrulhas = Number(e.target.value); });
+  $('#sortear')?.addEventListener('click', () => enviar({ t: 'patrulhas', n: Number($('#nPatrulhas').value) }));
   $('#abrirLeilao')?.addEventListener('click', () => enviar({ t: 'abrir_leilao' }));
   $('#copiar')?.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(S.sala.codigo); toast('Código copiado.'); } catch { toast(`Código: ${S.sala.codigo}`); }
@@ -1019,52 +1190,86 @@ function ligarAnfitriao() {
   $('#cancelarEnc')?.addEventListener('click', () => { S.confirmarEncerrar = false; atualizarJogo(); });
 }
 
+// E4: revanche. Na sala de espera, quem aceitar em 20 s joga de novo; na sala com código, o anfitrião reabre.
+function revancheHtml() {
+  const s = S.sala;
+  if (S.modo !== 'sala' || !s) return '';
+  if (s.tipo === 'espera') {
+    const r = s.revanche;
+    return `<div class="box"><div class="eyebrow">Revanche</div>${r ? `<p><b>${r.aceitaram}</b> jogador(es) aceitaram · <span data-fim="${r.fimEm}"></span></p>` : '<p class="note">Jogue de novo com os mesmos jogadores: entra quem aceitar em 20 s.</p>'}
+      <div class="row"><button class="btn primary" id="revanche" ${r?.euAceitei ? 'disabled' : ''}>${r?.euAceitei ? 'Você aceitou' : 'Revanche'}</button></div></div>`;
+  }
+  if (s.revancheCodigo) {
+    return `<div class="box"><div class="eyebrow">Revanche</div><p>O anfitrião reabriu a sala.</p><div class="row"><button class="btn primary" id="entrarRevanche" data-cod="${esc(s.revancheCodigo)}">Entrar na revanche</button></div></div>`;
+  }
+  if (s.souAnfitriao) {
+    return `<div class="box"><div class="eyebrow">Revanche</div><p class="note">Reabra a sala: todos os que ainda estão no resultado são levados juntos.</p><div class="row"><button class="btn primary" id="revanche">Reabrir a sala (revanche)</button></div></div>`;
+  }
+  return '';
+}
+
 function telaResultado() {
   const st = eu();
   if (!st) { S.tela = 'entrada'; return telaEntrada(); }
-  const p = E.pontuacao(st), sala = S.modo === 'sala';
-  const pos = sala ? S.placar.findIndex((x) => x.eu) + 1 : 0;
+  const p = E.pontuacao(st), sala = S.modo === 'sala', r = S.resultado, desafio = !sala && r?.modo === 'desafio';
+  const pos = sala ? S.placar.findIndex((x) => x.eu) + 1 : r?.pos || 0;
   const aindaJogando = sala ? S.placar.filter((x) => !x.fim).length : 0;
   const meta = E.METAS.find((m) => m.id === st.meta), cumpriu = E.metaCumprida(st);
-  const metasSala = sala ? S.placar.filter((x) => x.meta && !x.eu).map((x) => {
+  const metasMesa = S.placar.filter((x) => x.meta && !x.eu).map((x) => {
     const m = E.METAS.find((k) => k.id === x.meta.id);
     return `<li><b>${esc(x.apelido)}</b>: ${esc(m?.nome || '')} · ${x.meta.ok ? `cumpriu (+${m.pts})` : 'não cumpriu'}</li>`;
-  }).join('') : '';
+  }).join('');
+  const novas = sala ? (st.insignias || []) : (r?.novas || []);
+  const titulo = desafio ? 'Desafio do dia' : sala ? `Você ficou em ${pos}º de ${S.placar.length}` : S.novoRecorde ? '<span class="recorde">Novo recorde!</span>' : `Você ficou em ${pos}º de ${S.placar.length}`;
+  const top = S.ranking?.top || [];
   return `${topo(`<span class="sp"></span>${botaoSom()}<button class="btn sm" id="inicio">Voltar ao início</button>`)}
   <div class="wrap resultado">
-    <div class="eyebrow">Fim do mercado</div>
-    <h2>${sala ? `Você ficou em ${pos}º de ${S.placar.length}` : S.novoRecorde ? '<span class="recorde">Novo recorde!</span>' : 'Partida concluída'}</h2>
+    <div class="eyebrow">Fim do mercado${desafio ? (r.treino ? ' · treino' : ' · primeira tentativa do dia') : ''}</div>
+    <h2>${titulo}</h2>
+    ${desafio ? `<p class="note">${r.treino ? 'Você já tinha jogado o desafio de hoje: esta partida foi treino e não entra no placar do dia.' : 'Esta é a sua primeira tentativa de hoje: ela vale para o placar do dia.'}</p>` : ''}
     <div class="box pontos">
       <div class="pt"><span>Itens do kit (${st.kit.length} × 10)</span><b>${p.itens}</b></div>
       <div class="pt"><span>Kit completo</span><b>${p.kitCompleto}</b></div>
-      <div class="pt"><span>Cartas acertadas (${st.acertos} × ${E.PTS_CARTA})</span><b>${p.cartas}</b></div>
+      <div class="pt"><span>Cartas acertadas (${st.acertos + st.acertosNoite} × ${E.PTS_CARTA})</span><b>${p.cartas}</b></div>
       <div class="pt"><span>Saldo final (${st.saldo} BC ÷ 10)</span><b>${p.saldo}</b></div>
       <div class="pt"><span>Meta secreta: ${esc(meta?.nome || '')} · ${cumpriu ? 'cumprida' : 'não cumprida'}</span><b>${p.meta}</b></div>
       ${p.canivete ? `<div class="pt"><span>Canivete do leilão</span><b>${p.canivete}</b></div>` : ''}
       <div class="pt total"><span>Total</span><b>${p.total} pts</b></div>
     </div>
-    ${metasSala ? `<div class="box"><div class="eyebrow">Metas dos outros jogadores</div><ul class="metas-sala">${metasSala}</ul></div>` : ''}
-    ${sala ? `<div class="stack"><div class="eyebrow">Placar${aindaJogando ? ` · ${aindaJogando} ainda jogando` : ''}</div>${placarHtml()}</div>` : ''}
+    <div class="box"><div class="eyebrow">Insígnias desta partida</div>
+      ${novas.length ? `<div class="insignias">${novas.map((i) => `<div class="insignia">${seloHtml(i)}<div><b>${esc(E.INSIGNIAS.find((x) => x.id === i).nome)}</b><span class="note">${esc(E.INSIGNIAS.find((x) => x.id === i).desc)}</span></div></div>`).join('')}</div>` : '<p class="note">Nenhuma insígnia desta vez. Veja como ganhar cada uma em Minha trilha.</p>'}
+      <div class="row"><button class="btn sm" id="trilha">Minha trilha</button></div></div>
+    ${metasMesa ? `<div class="box"><div class="eyebrow">Metas dos outros jogadores</div><ul class="metas-sala">${metasMesa}</ul></div>` : ''}
+    ${S.placar.length > 1 ? `<div class="stack"><div class="eyebrow">Placar${aindaJogando ? ` · ${aindaJogando} ainda jogando` : ''}</div>${placarHtml()}${sala ? patrulhasHtml() : ''}</div>` : ''}
+    ${desafio && top.length ? `<div class="box"><div class="eyebrow">Placar do dia · ${S.ranking.total} jogador(es)</div><table class="extrato">${top.slice(0, 5).map((x, i) => `<tr><td>${i + 1}º ${esc(x.apelido)}${x.eu ? ' (você)' : ''}</td><td class="v">${x.pontos} pts</td></tr>`).join('')}</table>${r.valeu === false ? '<p class="note">A sua primeira tentativa de hoje já estava no placar.</p>' : ''}</div>` : ''}
+    ${revancheHtml()}
     <div class="promo"><b>Para chefes e responsáveis</b><span>No próximo acampamento, o grupo pode usar a carteira de evento do Trilha HUB: os jovens pagam com QR ou pulseira e os responsáveis acompanham cada gasto pelo WhatsApp.</span>${linkHub('resultado', 'Saiba mais sobre o Trilha HUB')}</div>
-    <div class="row"><button class="btn primary" id="denovo">${sala && S.sala?.tipo === 'espera' ? 'Entrar na fila de novo' : 'Jogar de novo'}</button><button class="btn" id="inicio2">Voltar ao início</button>${sala ? '<button class="btn" id="verTab">Ver o tabuleiro</button>' : ''}</div>
+    <div class="row"><button class="btn primary" id="denovo">${sala && S.sala?.tipo === 'espera' ? 'Entrar na fila de novo' : desafio ? 'Treinar de novo' : 'Jogar de novo'}</button><button class="btn" id="inicio2">Voltar ao início</button>${sala ? '<button class="btn" id="verTab">Ver o tabuleiro</button>' : ''}</div>
   </div>`;
 }
 
 function ligarResultado() {
-  const voltar = () => { if (S.modo === 'sala') { enviar({ t: 'sair_sala' }); ls.del('mt-sala'); } S.modo = null; S.peaoPos = {}; S.eu = null; ir('entrada'); };
+  const voltar = () => { if (S.modo === 'sala') { enviar({ t: 'sair_sala' }); ls.del('mt-sala'); } S.modo = null; S.peaoPos = {}; S.eu = null; S.resultado = null; S.confetou = false; ir('entrada'); };
   $('#inicio')?.addEventListener('click', voltar);
   $('#inicio2')?.addEventListener('click', voltar);
+  $('#trilha')?.addEventListener('click', abrirTrilha);
+  $('#revanche')?.addEventListener('click', () => enviar({ t: 'revanche' }));
+  $('#entrarRevanche')?.addEventListener('click', (e) => entrarNaRevanche(e.currentTarget.dataset.cod));
   $('#verTab')?.addEventListener('click', () => { S.verTab = true; S.tela = 'jogo'; render(); });
   $('#denovo')?.addEventListener('click', () => {
+    S.confetou = false;
     if (S.modo === 'sala' && S.sala?.tipo === 'espera') { voltar(); entrarNaFila(); }
     else if (S.modo === 'sala') voltar();
-    else jogarSozinho(false);
+    else jogarSozinho(false, S.resultado?.modo === 'desafio' ? 'desafio' : 'solo');
   });
+  // D6: toda partida termina com uma comemoração.
+  if (!S.confetou) { S.confetou = true; setTimeout(confete, 250); }
 }
 
 function render() {
   if (S.tela === 'entrada') { app.innerHTML = telaEntrada(); ligarEntrada(); }
   else if (S.tela === 'fila') { app.innerHTML = telaFila(); ligarFila(); }
+  else if (S.tela === 'trilha') { app.innerHTML = telaTrilha(); ligarTrilha(); }
   else if (S.tela === 'jogo') {
     const vazio = telaJogo();
     if (vazio) { app.innerHTML = vazio; $('#sair')?.addEventListener('click', sairDoJogo); }

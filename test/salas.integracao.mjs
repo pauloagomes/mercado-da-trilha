@@ -216,12 +216,12 @@ try {
     assert.ok(wa4.ultimo('estado').eu.insignias.includes('cofre'), 'o jogador recebe as insígnias na partida');
     assert.ok(Array.isArray(wa4.ultimo('estado').placar[0].insignias));
 
-    await S.pedirRevanche(wb4, beto); // ainda não terminou: a sala com código só encerra pelo anfitrião
-    assert.equal(s4.revancheCodigo, null);
-    await S.encerrarSala(s4, 'fim');
     await S.pedirRevanche(wb4, beto);
     assert.match(wb4.ultimo('erro').msg, /anfitrião/);
-    await S.pedirRevanche(wa4, ana);
+    assert.equal(s4.revancheCodigo, null);
+    assert.equal(s4.status, 'aberta');
+    await S.pedirRevanche(wa4, ana); // o anfitrião reabre: a sala atual encerra sozinha
+    assert.equal(s4.status, 'encerrada');
     assert.ok(s4.revancheCodigo && s4.revancheCodigo !== s4.codigo);
     criadas.push(s4.revancheCodigo);
     assert.equal(wb4.ultimo('revanche_sala').codigo, s4.revancheCodigo, 'os outros são levados para a sala nova');
