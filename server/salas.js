@@ -36,8 +36,12 @@ class Sala {
     this.anfitriao = r.anfitriao_id;
     this.rodadas = r.rodadas;
     this.semente = r.semente;
+    this.pontes = r.pontes || {};  // casa do tabuleiro -> jogadorId do guardião
+    this.cenas = [];               // o que aconteceu nas últimas jogadas, para os outros celulares animarem
+    this.cenaN = 0;
+    this.gravando = Promise.resolve();
     this.rodadaSync = r.rodada_sync || 1;
-    this.jogadores = new Map();  // jogadorId -> { partId, ordem, cor, st, gravando }
+    this.jogadores = new Map();  // jogadorId -> { partId, ordem, cor, st, ultimaReacao }
     this.sockets = new Set();    // conexões abertas nesta sala (jogadores e espectadores)
     this.mural = [];
     this.fimRodadaEm = null;
@@ -71,43 +75,46 @@ async function inserirSala(tipo, rodadas, anfitriao) {
 async function adicionarJogador(sala, jog) {
   const ordem = sala.jogadores.size;
   const cor = CORES[ordem % CORES.length];
-  const st = E.novoJogador({ apelido: jog.apelido, ficha: jog.ficha, rodadas: sala.rodadas, seed: sala.semente });
+  const st = E.novoJogador({ apelido: jog.apelido, ficha: jog.ficha, rodadas: sala.rodadas, seed: sala.semente, ordem, sala: true });
   st.saida = [];
   const r = await pool.query(
-    `INSERT INTO participacoes (sala_codigo, jogador_id, ordem, cor, saldo_bc, estado)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO participacoes (sala_codigo, jogador_id, ordem, cor, saldo_bc, estado, meta)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (sala_codigo, jogador_id) DO UPDATE SET atualizado_em = now() RETURNING id`,
-    [sala.codigo, jog.id, ordem, cor, st.saldo, E.visaoPropria(st)],
+    [sala.codigo, jog.id, ordem, cor, st.saldo, E.visaoPropria(st), st.meta],
   );
-  const p = { partId: r.rows[0].id, ordem, cor, st, gravando: Promise.resolve() };
+  const p = { partId: r.rows[0].id, ordem, cor, st, ultimaReacao: 0 };
   sala.jogadores.set(jog.id, p);
   return p;
 }
 
-function gravar(sala, jogId) {
-  const p = sala.jogadores.get(jogId);
-  if (!p) return;
-  const saida = p.st.saida.splice(0);
-  const st = p.st;
-  const pontos = E.pontuacao(st).total;
-  p.gravando = p.gravando.then(async () => {
+// Grava um ou mais jogadores na mesma transação (o pagador do pedágio e o guardião que recebeu a gratificação).
+function gravar(sala, ...ids) {
+  const itens = [...new Set(ids)].map((id) => [id, sala.jogadores.get(id)]).filter(([, p]) => p)
+    .map(([id, p]) => ({ id, p, st: p.st, saida: p.st.saida.splice(0), pontos: E.pontuacao(p.st).total }));
+  if (!itens.length) return;
+  const pontes = JSON.stringify(sala.pontes);
+  sala.gravando = sala.gravando.then(async () => {
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
-      await c.query(
-        `UPDATE participacoes SET rodada = $2, posicao = $3, saldo_bc = $4, kit = $5, pontos = $6, estado = $7, atualizado_em = now()
-         WHERE id = $1`,
-        [p.partId, st.rodada, st.pos, st.saldo, JSON.stringify(st.kit), pontos, E.visaoPropria(st)],
-      );
-      for (const s of saida) {
-        if (s.k === 'mov') {
-          await c.query('INSERT INTO movimentos (participacao_id, tipo, valor_bc, saldo_depois, descricao) VALUES ($1, $2, $3, $4, $5)',
-            [p.partId, s.tipo, s.valor, s.saldo, s.d]);
-        } else if (s.k === 'jogada') {
-          await c.query('INSERT INTO jogadas (sala_codigo, jogador_id, rodada, dado, casa) VALUES ($1, $2, $3, $4, $5)',
-            [sala.codigo, jogId, s.rodada, s.dado, s.casa]);
+      for (const { id, p, st, saida, pontos } of itens) {
+        await c.query(
+          `UPDATE participacoes SET rodada = $2, posicao = $3, saldo_bc = $4, kit = $5, pontos = $6, estado = $7, atualizado_em = now()
+           WHERE id = $1`,
+          [p.partId, st.rodada, st.pos, st.saldo, JSON.stringify(st.kit), pontos, E.visaoPropria(st)],
+        );
+        for (const s of saida) {
+          if (s.k === 'mov') {
+            await c.query('INSERT INTO movimentos (participacao_id, tipo, valor_bc, saldo_depois, descricao) VALUES ($1, $2, $3, $4, $5)',
+              [p.partId, s.tipo, s.valor, s.saldo, s.d]);
+          } else if (s.k === 'jogada') {
+            await c.query('INSERT INTO jogadas (sala_codigo, jogador_id, rodada, dado, casa, rolagem) VALUES ($1, $2, $3, $4, $5, $6)',
+              [sala.codigo, id, s.rodada, s.dado, s.casa, s.rolagem]);
+          }
         }
       }
+      await c.query('UPDATE salas SET pontes = $2 WHERE codigo = $1', [sala.codigo, pontes]);
       await c.query('COMMIT');
     } catch (e) {
       await c.query('ROLLBACK').catch(() => {});
@@ -136,8 +143,8 @@ export async function carregarSala(codigo) {
   const sala = new Sala(r.rows[0]);
   const ps = await pool.query('SELECT * FROM participacoes WHERE sala_codigo = $1 ORDER BY ordem', [codigo]);
   for (const row of ps.rows) {
-    const st = { ...row.estado, saida: [] };
-    sala.jogadores.set(row.jogador_id, { partId: row.id, ordem: row.ordem, cor: row.cor, st, gravando: Promise.resolve() });
+    const st = { ...row.estado, saida: [], cena: [] };
+    sala.jogadores.set(row.jogador_id, { partId: row.id, ordem: row.ordem, cor: row.cor, st, ultimaReacao: 0 });
   }
   if (salas.has(codigo)) return salas.get(codigo); // outra requisição carregou junto
   salas.set(codigo, sala);
@@ -165,6 +172,16 @@ function infoSala(sala, paraId) {
   };
 }
 
+// Guardião de cada ponte, pela ordem do jogador (o id interno não sai do servidor).
+function pontesPublicas(sala) {
+  const r = {};
+  for (const [pos, id] of Object.entries(sala.pontes)) {
+    const p = sala.jogadores.get(id);
+    if (p) r[pos] = p.ordem;
+  }
+  return r;
+}
+
 export function transmitir(sala) {
   for (const ws of sala.sockets) {
     const id = ws.jogadorId;
@@ -175,6 +192,8 @@ export function transmitir(sala) {
       eu: p ? { ...E.visaoPropria(p.st), cor: p.cor } : null,
       placar: placar(sala, id),
       mural: sala.mural.slice(-15),
+      pontes: pontesPublicas(sala),
+      cenas: sala.cenas,
     });
   }
 }
@@ -232,14 +251,37 @@ export async function encerrarSala(sala, motivo) {
 }
 
 // ---------- Ações do jogo ----------
-const ACOES = {
-  rolar: (st) => E.rolar(st),
-  comprar: (st, m) => E.comprar(st, Array.isArray(m.itens) ? m.itens.map(String).slice(0, 7) : []),
-  sair_loja: (st) => E.sairDaLoja(st),
-  responder: (st, m) => E.responder(st, Number(m.i)),
-  pagar: (st) => E.pagar(st),
-  ficar: (st) => E.ficarParado(st),
-};
+const ACOES = new Set(E.ACOES_DO_JOGO);
+
+// O motor da sala trabalha sobre os estados dos jogadores e as pontes da sala.
+function contexto(sala) {
+  const ctx = E.novoContexto(sala.pontes);
+  for (const [id, p] of sala.jogadores) ctx.estados.set(id, p.st);
+  return ctx;
+}
+
+// Esvazia a cena de cada jogador (o que aconteceu na jogada) para os celulares animarem
+// e anota no mural o que merece. Devolve os jogadores que tiveram novidade.
+function recolherCenas(sala) {
+  const ids = [];
+  for (const [id, p] of sala.jogadores) {
+    const cena = E.esvaziarCena(p.st);
+    if (!cena.length) continue;
+    ids.push(id);
+    sala.cenas.push({ n: ++sala.cenaN, ordem: p.ordem, cena });
+    for (const ev of cena) {
+      if (ev.t === 'fogo') anotarMural(sala, `${p.st.apelido} chegou ao Fogo de Conselho!`, p.cor);
+      else if (ev.t === 'kit') anotarMural(sala, `${p.st.apelido} completou o Kit de Acampamento!`, p.cor);
+      else if (ev.t === 'ponte') anotarMural(sala, `${p.st.apelido} assumiu a ponte.`, p.cor);
+      else if (ev.t === 'carta') {
+        const c = E.cartaPorId(p.st.resposta?.carta);
+        if (c?.sala) anotarMural(sala, `${p.st.apelido} tirou a carta de sala "${c.titulo}".`, p.cor);
+      }
+    }
+  }
+  if (sala.cenas.length > 16) sala.cenas = sala.cenas.slice(-16);
+  return ids;
+}
 
 export async function agir(ws, jog, msg) {
   const sala = ws.salaCodigo && salas.get(ws.salaCodigo);
@@ -247,27 +289,38 @@ export async function agir(ws, jog, msg) {
   const p = sala.jogadores.get(jog.id);
   if (!p) return enviar(ws, { t: 'erro', msg: 'Você está só assistindo esta sala.' });
   if (sala.status === 'encerrada') return enviar(ws, { t: 'erro', msg: 'O mercado já fechou.' });
+  if (!ACOES.has(msg.t)) return;
   const st = p.st;
   if (sala.tipo === 'espera' && st.rodada !== sala.rodadaSync - 1) {
     return enviar(ws, { t: 'erro', msg: 'Aguarde: a próxima rodada abre para todos juntos.' });
   }
-  const fogoAntes = st.fogo, kitAntes = st.kit.length;
-  const r = ACOES[msg.t](st, msg);
+  const r = E.agirNaSala(contexto(sala), jog.id, msg);
   if (r.erro) return enviar(ws, { t: 'erro', msg: r.erro });
-
-  if (st.fogo > fogoAntes) {
-    anotarMural(sala, `${st.apelido} chegou ao Fogo de Conselho!`, p.cor);
-    for (const s of sala.sockets) enviar(s, { t: 'fogo', apelido: st.apelido, meu: s.jogadorId === jog.id });
-  }
-  if (st.kit.length === E.ITENS.length && kitAntes < E.ITENS.length) anotarMural(sala, `${st.apelido} completou o Kit de Acampamento!`, p.cor);
 
   if (sala.tipo === 'codigo' && st.feito) {
     E.fecharRodada(st);
     if (st.fim) anotarMural(sala, `${st.apelido} terminou com ${E.pontuacao(st).total} pts.`, p.cor);
   }
-  gravar(sala, jog.id);
+  gravar(sala, jog.id, ...r.afetados, ...recolherCenas(sala));
   if (sala.tipo === 'espera' && todosFeitos(sala)) fecharRodadaSync(sala);
   else transmitir(sala);
+}
+
+// A3: reação rápida de uma lista fixa, sem alvo e no máximo uma a cada 3 s por jogador.
+export function reagir(ws, jog, msg) {
+  const sala = ws.salaCodigo && salas.get(ws.salaCodigo);
+  const p = sala?.jogadores.get(jog.id);
+  if (!p || sala.status === 'encerrada') return;
+  const i = Number(msg.i);
+  if (!Number.isInteger(i) || i < 0 || i >= E.REACOES.length) return;
+  const agora = Date.now();
+  if (agora - p.ultimaReacao < E.REACAO_INTERVALO_MS - 300) return;
+  p.ultimaReacao = agora;
+  const texto = `${p.st.apelido}: ${E.REACOES[i]}`;
+  anotarMural(sala, texto, p.cor);
+  // Vai direto aos celulares, sem reenviar o estado inteiro a cada reação.
+  for (const s of sala.sockets) enviar(s, { t: 'reacao', ordem: p.ordem, i, texto, cor: p.cor });
+  tocarAtividade(sala);
 }
 
 // ---------- Rodadas sincronizadas (sala de espera) ----------
@@ -286,13 +339,16 @@ function abrirRodadaSync(sala, gravarNoBanco = true) {
 function fecharRodadaSync(sala) {
   if (sala.status !== 'em_jogo') return;
   clearTimeout(sala.timer); sala.timer = null;
+  const ctx = contexto(sala);
+  const tocados = new Set();
   for (const [id, p] of sala.jogadores) {
     const st = p.st;
     if (st.fim || st.rodada !== sala.rodadaSync - 1) continue;
-    if (!st.feito) E.tempoEsgotado(st);
+    if (!st.feito) E.tempoEsgotado(st, Math.random, ctx, id);
     E.fecharRodada(st);
-    gravar(sala, id);
+    tocados.add(id);
   }
+  gravar(sala, ...tocados, ...recolherCenas(sala));
   sala.rodadaSync += 1;
   if (sala.rodadaSync > sala.rodadas) {
     const vencedor = placar(sala, null)[0];

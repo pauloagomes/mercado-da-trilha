@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { pool, migrar } from './db.js';
 import * as S from './salas.js';
 import { limparApelido, apelidoProibido } from './apelido.js';
-import { FICHAS, RODADAS_OPCOES, RODADAS_PADRAO } from '../public/js/engine.js';
+import { FICHAS, RODADAS_OPCOES, RODADAS_PADRAO, ACOES_DO_JOGO } from '../public/js/engine.js';
 
 const raiz = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.PORT) || 3000;
@@ -126,10 +126,11 @@ app.register(async (f) => {
             if (sala && sala.anfitriao === jog.id) await S.encerrarSala(sala, 'O anfitrião encerrou a sala.');
             return;
           }
-          case 'rolar': case 'comprar': case 'sair_loja': case 'responder': case 'pagar': case 'ficar':
-            return await S.agir(ws, atual, m);
+          case 'reagir': return S.reagir(ws, atual, m);
           case 'ping': return ws.send('{"t":"pong"}');
-          default: return;
+          default:
+            if (ACOES_DO_JOGO.includes(m.t)) return await S.agir(ws, atual, m);
+            return;
         }
       } catch (e) {
         req.log.error({ err: e }, 'erro ao tratar mensagem');
