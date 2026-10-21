@@ -139,6 +139,10 @@ SELECT slot, sum(total) FROM cliques GROUP BY slot ORDER BY 2 DESC;
 
 O apelido aparece no placar e no mural para outros jogadores, então o servidor recusa palavrões, ofensas e temas impróprios, inclusive com acento, números no lugar de letras ("m3rd4") e letras separadas ("m.e.r.d.a"). As listas ficam em `server/apelido.js`: `INTEIRAS` para palavras curtas, bloqueadas só como palavra inteira, e `RAIZES` para as que são bloqueadas mesmo dentro de outra palavra. Ao incluir uma raiz, confira se ela não aparece em palavras comuns (por exemplo, "puta" está em "disputa") e acrescente um caso em `test/apelido.test.js`. No jogo sozinho o apelido não é conferido, porque só o próprio jogador o vê.
 
+## Cenário do tabuleiro
+
+Três imagens com o mesmo enquadramento em `public/img/cenario/` (dia, noite e chuva), trocadas por fade conforme `climaDaRodada`: chuva na rodada do evento Chuva, noite na reta final, dia no resto. Os prompts, o processo de geração e os desvios desta versão estão em `docs/arte/cenario.md`.
+
 ## Fichas
 
 As 12 fichas em `public/img/fichas/` são **provisórias**, desenhadas em SVG simples. Substitua pelas artes geradas por IA e revisadas, mantendo os mesmos nomes de arquivo (`f01.svg` a `f12.svg`, ou troque a extensão em `fichaSrc` no `app.js`) e os nomes em `FICHAS` no `engine.js`. Formato: redondo, 256 px, fundo transparente, uniforme genérico sem a flor-de-lis oficial nem logotipos dos Escoteiros do Brasil.

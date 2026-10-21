@@ -1022,7 +1022,9 @@ function montarTabuleiro() {
     const [r, c] = posCasa(i);
     return `<div class="cell" data-casa="${i}" style="grid-row:${r};grid-column:${c};--t:var(--c-${k})" title="${E.CASAS[k].nome}">${ic(k)}<span class="lbl">${E.CASAS[k].nome}</span><span class="guardiao" hidden></span><span class="farol"></span></div>`;
   }).join('');
-  return `<div class="board" id="board" aria-label="Tabuleiro">${cells}
+  // O cenário fica embaixo das casas: o dia carrega já; noite e chuva só quando forem usados (ou com folga).
+  const cenario = `<div class="cenario" aria-hidden="true"><img class="c-dia" src="img/cenario/dia.webp" alt="" decoding="async"><img class="c-noite" data-src="img/cenario/noite.webp" alt="" decoding="async"><img class="c-chuva" data-src="img/cenario/chuva.webp" alt="" decoding="async"></div>`;
+  return `<div class="board" id="board" aria-label="Tabuleiro">${cenario}${cells}
     <div class="centro"><div class="nome">Mercado<br>da <span>Trilha</span></div>
       <div class="dados" id="dados"></div>
       <p class="note" id="nota"></p></div>
@@ -1037,8 +1039,16 @@ function atualizarCasas(st) {
     c.classList.toggle('feira', !!(E.CASAS[k].loja && E.descontoFeira(st, k)));
     c.classList.toggle('aqui', st.pos === i);
   });
-  $('#board')?.classList.toggle('noite', !st.fim && E.noite(st));
+  definirClima(E.climaDaRodada(st));
 }
+
+// Troca o cenário com um fade (só opacidade); a imagem é baixada na primeira vez que for usada.
+function definirClima(clima) {
+  const b = $('#board'); if (!b) return;
+  for (const c of ['noite', 'chuva']) b.classList.toggle(c, clima === c);
+  carregarCenario(b.querySelector(`.c-${clima}`));
+}
+const carregarCenario = (img) => { if (img && !img.getAttribute('src')) img.setAttribute('src', img.dataset.src); };
 function atualizarPontes(placar = S.placar) {
   E.TABULEIRO.forEach((k, i) => {
     const c = celula(i); if (!c || k !== 'pedagio') return;
@@ -1294,6 +1304,8 @@ function ligarFixos() {
     setTimeout(() => todos.forEach((x) => { x.disabled = false; }), E.REACAO_INTERVALO_MS);
   }));
   if (window.ResizeObserver) new ResizeObserver(() => layoutPeoes()).observe($('#board'));
+  // Com folga e sem economia de dados, já baixa os outros cenários para a troca não esperar a rede.
+  if (!navigator.connection?.saveData) setTimeout(() => document.querySelectorAll('.cenario img').forEach(carregarCenario), 8000);
 }
 
 function ligarPainel() {

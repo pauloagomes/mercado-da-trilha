@@ -709,3 +709,16 @@ test('F6: comprar o último item da missão a cumpre na hora, e quem já termino
   assert.equal(ctx.missao.vencedor, 'Ana', 'quem já terminou não conta');
   assert.ok(ana.cena.some((c) => c.t === 'missao'));
 });
+
+test('cenário: chuva na rodada do evento Chuva, noite na reta final, dia no resto', () => {
+  const st = jogo({ agenda: [{ rodada: 3, tipo: 'chuva' }, { rodada: 6, tipo: 'feira', loja: 'exp' }] });
+  assert.equal(E.climaDaRodada(st), 'dia');
+  avancar(st, 3);
+  assert.equal(E.climaDaRodada(st), 'chuva');
+  avancar(st, 4);
+  assert.equal(E.climaDaRodada(st), 'dia', 'a chuva dura uma rodada');
+  avancar(st, 10);
+  assert.equal(E.climaDaRodada(st), 'noite');
+  E.aplicarEventoAgora(st, 'chuva');
+  assert.equal(E.climaDaRodada(st), 'chuva', 'a chuva do Mestre do mercado também molha o tabuleiro');
+});

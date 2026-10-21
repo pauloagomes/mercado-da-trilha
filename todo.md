@@ -5,6 +5,8 @@ Estado: as etapas 1 a 4 do RFC "Mercado da Trilha mais divertido e interativo" e
 ## Etapa 5: pronto para lançar
 
 - [ ] Trocar as 12 fichas provisórias pelas artes finais (mesmos nomes de arquivo, 256 px, sem flor-de-lis oficial nem logotipos).
+- [ ] Cenário do tabuleiro: regenerar o Dia com araucárias e fogueira apagada num modelo melhor e refazer Noite e Chuva por edição dele (prompts e passo a passo em `docs/arte/cenario.md`). A versão atual não tem araucárias e uma palmeira invade a clareira.
+- [ ] Conferir a licença de uso comercial das imagens geradas pelo Higgsfield no plano usado.
 - [ ] Revisar as 36 cartas contra a carteira de evento real do Trilha HUB (recarga por Pix, saldo máximo, aviso no WhatsApp, extrato por link, pulseira com apelido, QR bloqueado pela chefia).
 - [ ] Teste com uma tropa real e ajuste do balanceamento a partir dele.
 - [ ] Conferir as metas de lançamento com `npm run simular` (hoje só o pagamento recusado fica fora: 18% contra 30% a 50%).

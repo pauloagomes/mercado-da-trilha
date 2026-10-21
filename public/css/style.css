@@ -103,7 +103,7 @@ label.f { display: grid; gap: 4px; font-size: .9rem; font-weight: 600; }
 .j-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 400px); gap: 16px; align-items: start; }
 @media (max-width: 900px) { .j-main { grid-template-columns: 1fr; } }
 .board { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); grid-template-rows: repeat(6, 1fr); gap: 4px; aspect-ratio: 1; max-width: 100%; background: var(--hero); padding: 6px; border-radius: 16px; }
-.cell { background: color-mix(in srgb, var(--t) 14%, var(--panel)); border-radius: 7px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; padding: 13px 2px 4px; min-width: 0; overflow: hidden; }
+.cell { background: color-mix(in srgb, color-mix(in srgb, var(--t) 16%, var(--panel)) 82%, transparent); border-radius: 7px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; padding: 13px 2px 4px; min-width: 0; overflow: hidden; }
 .cell::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 8px; background: var(--t); }
 .cell svg.ic { font-size: clamp(15px, 3.2vw, 26px); color: var(--t); }
 .cell .lbl { font-size: clamp(8.5px, 1.1vw, 11.5px); font-weight: 700; text-align: center; line-height: 1.1; overflow-wrap: anywhere; }
@@ -111,7 +111,10 @@ label.f { display: grid; gap: 4px; font-size: .9rem; font-weight: 600; }
 .cell.feira::after { content: "-5"; position: absolute; top: 10px; right: 4px; font-size: 10px; font-weight: 800; color: var(--good); }
 .cell.aqui { outline: 3px solid var(--sun); outline-offset: -3px; }
 @media (max-width: 520px) { .cell .lbl { display: none; } }
-.centro { grid-column: 2 / 6; grid-row: 2 / 6; background: var(--panel); border-radius: 9px; display: grid; place-items: center; align-content: center; gap: 10px; padding: 10px; text-align: center; }
+.centro { position: relative; grid-column: 2 / 6; grid-row: 2 / 6; background: color-mix(in srgb, var(--panel) 18%, transparent); border-radius: 9px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px; text-align: center; }
+/* nome e dado em cima, aviso embaixo: o meio fica livre para a fogueira do cenário */
+.centro .nome, .centro #nota { background: color-mix(in srgb, var(--panel) 86%, transparent); border-radius: 10px; padding: 4px 10px; }
+.centro #nota { margin-top: auto; max-width: 100%; }
 .centro .nome { font-family: var(--display); font-weight: 700; font-size: clamp(.95rem, 2.6vw, 1.5rem); line-height: 1.05; }
 .centro .nome span { color: var(--c-partida); }
 .dado { width: clamp(52px, 10vw, 80px); aspect-ratio: 1; border-radius: 16px; background: var(--panel); border: 3px solid var(--ink); display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); padding: 10%; box-shadow: 0 4px 0 var(--ink); }
@@ -256,13 +259,15 @@ details summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
 @keyframes flutua-delta { 0% { opacity: 0; transform: translateY(6px); } 15% { opacity: 1; } 100% { opacity: 0; transform: translateY(-10px); } }
 
 /* Tabuleiro vivo (D7): noite, loja fechada de luz apagada e feira com bandeirinhas */
-.board::after { content: ""; position: absolute; inset: 0; border-radius: 16px; background: #060A1C; opacity: 0; pointer-events: none; transition: opacity 1.2s ease; z-index: 1; }
-.board.noite::after { opacity: .5; }
+/* Cenário (dia, noite e chuva) embaixo das casas; as casas ficam translúcidas para ele aparecer */
+.cenario { position: absolute; inset: 0; border-radius: 16px; overflow: hidden; pointer-events: none; }
+.cenario img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1.2s ease; }
+.cenario .c-dia { opacity: 1; }
+.board.noite .c-noite, .board.chuva .c-chuva { opacity: 1; }
 .cell.fechada::after { content: ""; position: absolute; inset: 0; background: #0B0F0C; opacity: .55; }
 .cell.feira::before { background: repeating-linear-gradient(90deg, var(--c-partida) 0 8px, var(--c-enf) 8px 16px, var(--c-bussola) 16px 24px); }
 .okmsg.brilho { position: relative; animation: brilho 1.4s ease-out; }
 @keyframes brilho { 0% { transform: scale(.97); opacity: .4; } 40% { transform: scale(1.02); opacity: 1; } 100% { transform: scale(1); } }
-.board.noite .peoes-camada, .board.noite .centro { z-index: 2; }
 
 /* Etapa 3: insígnias, Minha trilha, patrulhas e revanche */
 .selo { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--c); background: color-mix(in srgb, var(--c) 18%, var(--panel)); color: var(--ink); font-size: .78rem; font-weight: 800; line-height: 1; flex: none; vertical-align: middle; }

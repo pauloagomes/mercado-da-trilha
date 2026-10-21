@@ -575,6 +575,13 @@ function recusar(st, valor, d) {
 // C4: nas últimas rodadas ("noite no acampamento") créditos e acertos valem em dobro.
 export function noite(st) { return rodadaAtual(st) > st.rodadas - NOITE_RODADAS; }
 
+// Cenário do tabuleiro: chuva na rodada do evento Chuva (que dura uma rodada), noite na reta final, dia no resto.
+export function climaDaRodada(st) {
+  const n = rodadaAtual(st);
+  if (!st.fim && st.agenda.some((e) => e.tipo === 'chuva' && e.rodada === n)) return 'chuva';
+  return noite(st) ? 'noite' : 'dia';
+}
+
 export function creditar(st, valor, d, tipo = 'credito') {
   if (noite(st)) { valor *= 2; d += ' (em dobro: noite)'; }
   if (st.saldo + valor > SALDO_MAX) {
