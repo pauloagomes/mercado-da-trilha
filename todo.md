@@ -22,6 +22,17 @@ Estado: as etapas 1 a 4 do RFC "Mercado da Trilha mais divertido e interativo" e
 - [ ] Revisão jurídica da política de uso abaixo, principalmente por envolver crianças (LGPD).
 - [ ] Reduzir o cache dos arquivos estáticos (`maxAge: 1h`) ou versionar os arquivos: um cliente antigo com servidor novo pode falhar até o cache vencer.
 
+## Abertura como projeto open source
+
+O README, o `CONTRIBUTING.md` e o `CODE_OF_CONDUCT.md` já tratam o projeto como open source, mas ainda faltam:
+
+- [ ] **Escolher e adicionar uma licença** (`LICENSE` e o campo `license` do `package.json`). Sem licença, ninguém tem permissão legal de usar, copiar ou modificar o código, mesmo com o repositório público.
+- [ ] Decidir a licença das artes (fichas e cenário), que pode ser diferente da do código, e conferir os termos de uso das imagens geradas por IA.
+- [ ] Publicar o repositório: hoje ele não tem remoto (`git remote -v` vazio).
+- [ ] Definir o canal oficial de contato dos mantenedores, que o Código de Conduta cita para reportar problemas.
+- [ ] Antes de publicar, conferir que o histórico do git não tem segredos (o `.env` está no `.gitignore`; os testes usam só senhas de desenvolvimento).
+- [ ] Opcional: modelos de Issue e de Pull Request em `.github/`, com os campos que o `CONTRIBUTING.md` pede.
+
 ## Política de uso (rascunho simples)
 
 > Rascunho para revisão antes de publicar. Fica visível para jogadores e responsáveis.

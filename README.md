@@ -66,6 +66,34 @@ Todas valem no jogo sozinho e nas salas, exceto onde indicado. As regras ficam e
 - **Reações rápidas (A3, salas).** Seis reações fixas, sem alvo, uma a cada 3 s por jogador.
 - **Sensação de jogo (D0 a D3, D5).** Tabuleiro e peões ficam na tela e só os painéis são redesenhados; o peão anda casa a casa, o dado gira no centro, moedas voam para o saldo e o número conta. Sons curtos gerados no navegador (Web Audio, sem arquivo) e vibração curta no Android; o botão do topo liga e desliga, e a escolha fica no aparelho. Com "reduzir movimento" as animações viram troca direta.
 
+## Regras da Etapa 2 (rodada viva)
+
+- **Eventos (C2, F4).** A cada 3 rodadas (3, 6, 9...) há um evento sorteado entre 8, igual para a sala toda, sem repetir na partida. **Feira** (5 BC de desconto numa loja, 2 rodadas), **Queda de energia** (loja fechada, 2 rodadas), **Chuva** (sem Lona paga 5 BC), **Visita dos pais** (recarga de 30 BC por Pix, recusada inteira se a conta passar de 300 BC), **Cantina aberta** (lanche de 8 BC; quem tem Panela não paga), **Jogo noturno** (aluguel de 5 BC; quem tem Lanterna não paga), **Inspeção de barraca** (multa de 8 BC para quem não tem Kit primeiros socorros) e **Mutirão** (+10 BC). Pagamento recusado por evento não tira a vez do jogador.
+- **Anúncio (C1).** Uma rodada antes, um aviso diz o que vem na próxima. A feira do exemplo do RFC tem 10 BC de desconto; o jogo mantém os 5 BC que já tinha.
+- **Itens com poder (B5).** Lona contra Chuva e "Furou a lona", Corda contra "Ponte quebrada", Lanterna contra o Perdido (nem chega a se perder), Kit primeiros socorros contra o curativo (carta "Machucado") e a multa da inspeção, Panela na cantina. A Bússola dá um dado duplo de graça, uma vez.
+- **Noite no acampamento (C4).** Nas 3 últimas rodadas todo crédito e toda carta certa valem em dobro (o teto de 300 BC continua valendo); o tabuleiro mostra o cenário da noite.
+- **Leilão do Canivete (C3).** +15 pts. Lance único e fechado de 0, 10, 20, 30 ou 40 BC, sem passar do saldo; ganha o maior e, no empate, quem tem menos saldo. Lance máximo abaixo de 10 BC não vence. Na sala de espera abre sozinho entre as rodadas 5 e 6; na sala com código o anfitrião abre quando quiser, uma vez. Não existe no jogo sozinho.
+- **Votação de evento (A5, sala de espera).** Antes de a rodada que anuncia um evento começar, a sala tem 10 s para escolher entre 2 eventos; empate sorteia, e sem votos vale o sorteado. A janela fecha antes se todos já votaram.
+- **Relógio da jogada (C6).** Sala de espera: 20 s para jogar e mais 20 s se cair numa loja, carta ou dado duplo; nos últimos 10 s o relógio fica laranja e aparece quem ainda decide. Rodada perdida passa sozinha em todos os modos. `RODADA_MS` é a base de 20 s.
+- **Placar que sobe (C5).** Setas de subida e descida, "+N pts" da última jogada e aviso de "Virada!" quando o líder muda.
+- **Tela (D4, D6, D7).** O aviso de gasto desce do topo no formato da mensagem do Trilha HUB; confete no kit completo e no Canivete, brilho na carta certa; loja fechada de luz apagada e feira com bandeirinhas.
+- **Cartas (F2).** As alternativas absurdas ("Em lugar nenhum", "Não faz diferença") deram lugar aos erros que as pessoas cometem de verdade.
+
+O banco ganhou `eventos_sala` e `lances` (migração 003).
+
+## Regras da Etapa 3 (motivos para voltar)
+
+- **Baralho de 36 cartas (F3).** 12 de Bússola, 12 de Tempestade e 12 de sala, sobre o que a carteira de evento faz: recarga por Pix dos responsáveis, saldo máximo, aviso de gasto no WhatsApp, extrato por link, pulseira com apelido, QR perdido bloqueado pela chefia e pagamento recusado sem saldo. Cada jogador tem o seu baralho, embaralhado pela semente: nenhuma carta se repete até o baralho acabar. No aparelho, as cartas das últimas partidas (até 24) vão para o fim do baralho da próxima. As 36 cartas ainda precisam da revisão contra a carteira real (Etapa 5).
+- **Rivais virtuais (A6).** O jogo sozinho tem 3 rivais (Lobo Veloz, Coruja Atenta e Raposa Esperta) que jogam pelo mesmo motor da sala, com as estratégias de `public/js/rivais.js` (apressado, poupador e comprador). Com eles, guardião da ponte, cartas de sala, missão e placar funcionam sem internet. A mesma lógica de jogada é usada pela simulação.
+- **Insígnias (E1).** 12 insígnias conferidas quando a partida acaba (`INSIGNIAS` no `engine.js`). "Campeão da mesa" só sai quando todos da sala terminaram. Aparecem na entrada, no resultado, no placar e em Minha trilha.
+- **Desafio do dia (E2).** Todos jogam a mesma partida no dia (semente do dia civil de São Paulo): mesmos eventos, cartas e meta, e o dado de cada rodada vem da semente, da rodada e da ordem da ação. Roda no aparelho, sem rivais e sem internet. A primeira tentativa vale para o placar do dia; as outras são treino. O aparelho envia a **lista de ações** e o servidor repete a partida (`rodarDesafio`), só aceitando o resultado que ele mesmo calcular. Dá para enviar até 2 dias depois.
+- **Minha trilha (E3).** Últimas 20 partidas, recorde de cada modo e as 12 insígnias. O resultado do jogo sozinho sobe quando houver conexão, de uma fila guardada no aparelho; o id da partida vem do aparelho, então reenviar não duplica.
+- **Revanche (E4).** Sala de espera: quem aceitar em 20 s joga de novo com os mesmos jogadores. Sala com código: o anfitrião reabre (encerrando a sala atual, se estiver aberta) e todos que estavam no resultado são levados para a sala nova. Jogo sozinho: "Jogar de novo".
+- **Patrulhas (A4, sala com código).** O anfitrião escolhe de 2 a 6 patrulhas e o sistema sorteia quem fica em cada uma. O placar mostra a média de pontos por patrulha. Quem entra depois cai na patrulha com menos gente.
+- **Mestre do mercado (C7, sala com código).** O anfitrião chama Feira, Chuva ou Visita dos pais para a sala toda na hora, na rodada em que cada jogador estiver (no máximo um a cada 15 s).
+
+O banco ganhou `insignias`, `partidas_solo`, `desafios_dia`, `participacoes.patrulha` e o índice do histórico (migração 004).
+
 ## Regras da Etapa 4 (trocas, missão e conta)
 
 - **Feira de Trocas (A7).** Casa nova do tabuleiro, no lugar de uma Agência (a casa sem pergunta, para não tirar cartas). O jogador troca um item do kit por outro e **nenhum BC muda de conta**. O baú da Feira troca na hora por um item que custa o mesmo ou menos. Nas salas também dá para oferecer a troca aos outros: quem aceitar primeiro (e tiver o item pedido e não tiver o oferecido) troca. Na sala de espera a oferta vale só na rodada; na sala com código vale na rodada e na seguinte. Sem itens no kit a casa não faz nada.
@@ -159,3 +187,32 @@ Cada etapa tem uma faixa mínima (`FAIXAS.etapa`) e o RFC define a meta de lanç
 - Confirmar o destino de `TRILHAHUB_URL`.
 - Quadro de recordes, com e-mail do responsável confirmado por código (está desenhado no plano, ainda não foi implementado).
 - Etapa 5 do RFC: fichas finais, revisão das 36 cartas contra a carteira real, teste com uma tropa e ajuste do balanceamento. A lista completa de pendências está em `todo.md`.
+
+## 🤝 Contribuindo
+
+Este projeto é open source e contribuições da comunidade são muito bem-vindas!
+
+Você pode contribuir de diversas formas:
+
+- 🐛 Reportando bugs.
+- 💡 Sugerindo novas funcionalidades.
+- 🎮 Propondo melhorias para o jogo.
+- 📝 Melhorando a documentação.
+- 💻 Enviando correções e melhorias no código.
+- 🔧 Criando Pull Requests.
+
+Antes de contribuir, recomendamos a leitura do nosso **[Guia de Contribuição](CONTRIBUTING.md)**.
+
+Para manter uma comunidade saudável e colaborativa, também pedimos que todos os participantes conheçam nosso **[Código de Conduta](CODE_OF_CONDUCT.md)**.
+
+### ⏳ Sobre revisões e respostas
+
+Este é um projeto desenvolvido de forma contínua e as contribuições são analisadas conforme a disponibilidade dos mantenedores.
+
+Uma Issue ou Pull Request pode levar algum tempo para ser analisada e **não existe garantia de prazo para resposta, aprovação ou implementação**.
+
+Todas as sugestões serão consideradas, mas a decisão de incorporar uma alteração ao projeto cabe aos mantenedores.
+
+Se você tiver uma ideia, encontrou um problema ou quiser ajudar a melhorar o jogo, abra uma **Issue** ou envie um **Pull Request**.
+
+Toda contribuição é bem-vinda. ❤️
