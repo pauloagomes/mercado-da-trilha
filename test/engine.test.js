@@ -9,8 +9,8 @@ test('tabuleiro tem 20 casas com as quantidades do plano', () => {
   const c = (k) => E.TABULEIRO.filter((x) => x === k).length;
   assert.equal(E.TABULEIRO.length, 20);
   assert.deepEqual(
-    [c('partida'), c('agencia'), c('util'), c('exp'), c('enf'), c('pedagio'), c('bussola'), c('tempestade'), c('perdido'), c('fogo')],
-    [1, 2, 3, 3, 2, 2, 2, 3, 1, 1],
+    [c('partida'), c('agencia'), c('util'), c('exp'), c('enf'), c('pedagio'), c('bussola'), c('tempestade'), c('perdido'), c('fogo'), c('troca')],
+    [1, 1, 3, 3, 2, 2, 2, 3, 1, 1, 1],
   );
   assert.equal(E.CARTAS.length + E.CARTAS_SALA.length, 36);
   assert.equal(E.CARTAS.length, 24);
@@ -85,7 +85,7 @@ test('tempo esgotado: carta conta como errada e loja sai sem comprar', () => {
 test('pontuação e desempate', () => {
   const st = E.novoJogador({ apelido: 'Gil', ficha: 'f07', seed: 1 });
   st.kit = E.ITENS.map((i) => i.id); st.acertos = 3; st.saldo = 45;
-  assert.deepEqual(E.pontuacao(st), { itens: 70, kitCompleto: 20, cartas: 30, saldo: 4, meta: 0, canivete: 0, total: 124 });
+  assert.deepEqual(E.pontuacao(st), { itens: 70, kitCompleto: 20, cartas: 30, saldo: 4, meta: 0, canivete: 0, missao: 0, total: 124 });
   const lista = [{ pontos: 50, saldo: 10, acertos: 1 }, { pontos: 50, saldo: 30, acertos: 0 }, { pontos: 60, saldo: 0, acertos: 0 }];
   lista.sort(E.compararPlacar);
   assert.deepEqual(lista.map((x) => x.pontos + '/' + x.saldo), ['60/0', '50/30', '50/10']);
@@ -560,6 +560,7 @@ function jogarDesafio(dia, escolha = 'rolar') {
       faz(it ? { t: 'comprar', itens: [it.id] } : { t: 'sair_loja' });
     } else if (st.pend?.tipo === 'carta') faz({ t: 'responder', i: 0 });
     else if (st.pend?.tipo === 'perdido') faz({ t: 'arriscar' });
+    else if (st.pend?.tipo === 'troca') faz({ t: 'sair_troca' });
     else faz({ t: 'pagar' });
   }
   return { st, acoes };
@@ -593,4 +594,118 @@ test('E2: o servidor recusa ações inválidas, partida incompleta e ações a m
   assert.match(E.rodarDesafio('2026-10-22', [{ t: 'comprar', itens: ['lona'] }]).erro, /Ação 1/);
   assert.match(E.rodarDesafio('2026-10-22', 'x').erro, /inválida/);
   assert.match(E.rodarDesafio('2026-10-22', new Array(401).fill({ t: 'rolar' })).erro, /inválida/);
+});
+
+// ---------- Etapa 4 ----------
+const naTroca = (kit, extra = {}) => { const st = jogo({ kit, ...extra }); st.rolou = true; st.pend = { tipo: 'troca' }; return st; };
+const salaCtx = (...nomes) => {
+  const ctx = E.novoContexto({}); ctx.ofertas = true;
+  nomes.forEach((n, i) => ctx.estados.set(n, E.novoJogador({ apelido: n, ficha: 'f01', seed: 9, ordem: i, sala: true })));
+  return ctx;
+};
+
+test('A7: a Feira de Trocas é uma casa do tabuleiro e só abre com item no kit', () => {
+  assert.equal(E.TABULEIRO[15], 'troca');
+  assert.equal(E.CASAS.troca.nome, 'Feira de Trocas');
+  const vazio = jogo({ pos: 14 });
+  E.rolar(vazio, seq(dado(1)));
+  assert.equal(vazio.pend, null, 'sem item não há o que trocar');
+  assert.match(vazio.avisos.at(-1).texto, /ainda não tem itens/);
+  const com = jogo({ pos: 14, kit: ['corda'] });
+  E.rolar(com, seq(dado(1)));
+  assert.equal(com.pend.tipo, 'troca');
+});
+
+test('A7: o baú troca item por item de igual valor ou menor, sem mexer no saldo', () => {
+  const st = naTroca(['lona']); // Lona 25 BC
+  assert.match(E.trocarNoBau(st, 'lona', 'lona').erro, /diferente/);
+  assert.match(E.trocarNoBau(st, 'panela', 'corda').erro, /no seu kit/);
+  assert.match(E.trocarNoBau(st, 'lona', 'kitps').erro, /mesmo ou menos/, 'Kit custa 30 BC');
+  assert.ok(E.trocarNoBau(st, 'lona', 'panela').ok); // Panela 20 BC
+  assert.deepEqual(st.kit, ['panela']);
+  assert.equal(st.saldo, 100);
+  assert.ok(st.feito && st.pend === null);
+  assert.equal(st.stats.trocas, 1);
+  assert.match(E.trocarNoBau(naTroca(['lona', 'panela']), 'lona', 'panela').erro, /já tem/);
+  assert.match(E.trocarNoBau(jogo({ kit: ['lona'] }), 'lona', 'panela').erro, /Feira de Trocas/);
+});
+
+test('A7: a oferta numa sala vale para quem aceitar primeiro, e nenhum BC muda de conta', () => {
+  const ctx = salaCtx('Ana', 'Beto', 'Caio');
+  const [ana, beto, caio] = ['Ana', 'Beto', 'Caio'].map((n) => ctx.estados.get(n));
+  ana.kit = ['lona']; beto.kit = ['panela']; caio.kit = ['panela', 'lona'];
+  ana.pend = { tipo: 'troca' }; ana.rolou = true;
+  const r = E.agirNaSala(ctx, 'Ana', { t: 'oferecer_troca', dar: 'lona', querer: 'panela' });
+  assert.ok(r.ok && ana.feito);
+  assert.deepEqual(ana.oferta, { dar: 'lona', querer: 'panela', rodada: 0 });
+  assert.equal(E.podeAceitar(caio, ana), false, 'Caio já tem a Lona');
+  assert.equal(E.podeAceitar(ana, ana), false);
+  assert.ok(E.podeAceitar(beto, ana));
+  const t = E.agirNaSala(ctx, 'Beto', { t: 'aceitar_troca', de: 'Ana' });
+  assert.deepEqual(t.afetados.sort(), ['Ana', 'Beto']);
+  assert.deepEqual(ana.kit, ['panela']);
+  assert.deepEqual(beto.kit, ['lona']);
+  assert.deepEqual([ana.saldo, beto.saldo], [100, 100]);
+  assert.equal(ana.oferta, null);
+  assert.match(E.agirNaSala(ctx, 'Caio', { t: 'aceitar_troca', de: 'Ana' }).erro, /não está mais disponível/, 'só o primeiro leva');
+  assert.match(ana.avisos.at(-1).texto, /Beto aceitou/);
+});
+
+test('A7: oferecer exige sala, e a oferta vence depois da rodada seguinte', () => {
+  const solo = naTroca(['lona']);
+  assert.match(E.oferecerTroca(solo, 'lona', 'panela', null).erro, /sala/);
+  const st = jogo({ kit: ['lona'] });
+  st.oferta = { dar: 'lona', querer: 'panela', rodada: 2 };
+  st.rodada = 3; assert.equal(E.ofertaAtiva(st), true);
+  st.rodada = 4; assert.equal(E.ofertaAtiva(st), false);
+  const fim = jogo({ kit: ['lona'], fim: true }); fim.oferta = { dar: 'lona', querer: 'panela', rodada: 0 };
+  assert.equal(E.ofertaAtiva(fim), false);
+});
+
+test('A7: tempo esgotado sai da Feira de Trocas', () => {
+  const st = naTroca(['corda']);
+  E.tempoEsgotado(st, seq(0.5));
+  assert.equal(st.pend, null);
+  assert.ok(st.feito);
+});
+
+test('F5: toda carta tem texto curto de até 15 palavras, já com a pergunta', () => {
+  for (const c of [...E.CARTAS, ...E.CARTAS_SALA]) {
+    assert.ok(c.curto, `${c.id} sem texto curto`);
+    const palavras = c.curto.trim().split(/\s+/).length;
+    assert.ok(palavras <= 15, `${c.id}: ${palavras} palavras`);
+    assert.ok(c.curto.trim().endsWith('?'), `${c.id}: o texto curto termina na pergunta`);
+    assert.ok(c.curto.length < c.historia.length + c.pergunta.length, `${c.id}: não é mais curto que o completo`);
+  }
+  assert.equal(E.cartaMostrada({ seed: 3 }, 'vovo').curto, 'O vovô mandou 30 BC. E se a conta passar de 300 BC?');
+});
+
+test('F6: a missão da sala é igual para todos e quem cumpre primeiro leva 15 pts', () => {
+  assert.deepEqual(E.missaoDaPartida(5), E.missaoDaPartida(5));
+  assert.equal(new Set(Array.from({ length: 60 }, (_, i) => E.missaoDaPartida(i + 1).id)).size, E.MISSOES.length, 'todas as missões saem');
+  const ctx = salaCtx('Ana', 'Beto');
+  ctx.missao = { id: 'cozinha', vencedor: null };
+  const [ana, beto] = ['Ana', 'Beto'].map((n) => ctx.estados.get(n));
+  assert.match(E.descreverMissao(ctx.missao), /Montar a cozinha \(Panela e Lona\)/);
+  ana.kit = ['panela']; beto.kit = ['panela', 'lona'];
+  assert.equal(E.conferirMissao(ctx), 'Beto');
+  assert.equal(ctx.missao.vencedor, 'Beto');
+  assert.equal(beto.missaoPts, 15);
+  assert.equal(E.pontuacao(beto).missao, 15);
+  assert.match(ana.avisos.at(-1).texto, /Beto cumpriu a missão/);
+  ana.kit = ['panela', 'lona'];
+  assert.equal(E.conferirMissao(ctx), null, 'só o primeiro');
+  assert.equal(ana.missaoPts, 0);
+});
+
+test('F6: comprar o último item da missão a cumpre na hora, e quem já terminou não ganha', () => {
+  const ctx = salaCtx('Ana', 'Beto');
+  ctx.missao = { id: 'rota', vencedor: null };
+  const ana = ctx.estados.get('Ana'), beto = ctx.estados.get('Beto');
+  beto.kit = ['mapa', 'bussola']; beto.fim = true;
+  ana.kit = ['mapa']; ana.pend = { tipo: 'loja', loja: 'exp' }; ana.rolou = true;
+  const r = E.agirNaSala(ctx, 'Ana', { t: 'comprar', itens: ['bussola'] });
+  assert.ok(r.ok);
+  assert.equal(ctx.missao.vencedor, 'Ana', 'quem já terminou não conta');
+  assert.ok(ana.cena.some((c) => c.t === 'missao'));
 });

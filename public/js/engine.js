@@ -13,7 +13,8 @@ export const DADO_DUPLO_CUSTO = 5;
 export const AJUDA_GANHO = 15;
 export const GRATIFICACAO = 3;
 export const PTS_CARTA = 10;
-export const VERSAO_ESTADO = 4;
+export const VERSAO_ESTADO = 5;
+export const MISSAO_PTS = 15;         // F6: quem cumpre a missão da sala primeiro
 export const NOITE_RODADAS = 3;        // C4: nas últimas 3 rodadas créditos e acertos valem em dobro
 export const DESCONTO_FEIRA = 5;
 export const LANCES = [0, 10, 20, 30, 40];
@@ -36,12 +37,13 @@ export const CASAS = {
   tempestade: { nome: 'Tempestade' },
   perdido:    { nome: 'Perdido na Trilha' },
   fogo:       { nome: 'Fogo de Conselho' },
+  troca:      { nome: 'Feira de Trocas' },
 };
 
 // 20 casas, sentido horário a partir da Partida.
 export const TABULEIRO = [
   'partida', 'util', 'bussola', 'exp', 'tempestade', 'perdido', 'agencia', 'util', 'pedagio', 'tempestade',
-  'enf', 'exp', 'fogo', 'util', 'pedagio', 'agencia', 'bussola', 'exp', 'enf', 'tempestade',
+  'enf', 'exp', 'fogo', 'util', 'pedagio', 'troca', 'bussola', 'exp', 'enf', 'tempestade',
 ];
 
 export const ITENS = [
@@ -308,6 +310,82 @@ export const CARTAS_SALA = [
     efeitoSala: (alvo) => { if (!alvo.kit.includes('kitps')) cobrarDaSala(alvo, 6, 'Curativo do tombo coletivo'); } },
 ];
 
+// F5: texto curto para os Lobinhos (até 15 palavras, já com a pergunta), lido junto com o chefe ou o
+// responsável. As Escoteiras e os Escoteiros em diante leem a história e a pergunta completas.
+const CURTOS = {
+  vovo: 'O vovô mandou 30 BC. E se a conta passar de 300 BC?',
+  contador: 'Onde você vê cada entrada e saída de BC da sua conta?',
+  ajudante: 'Você ganhou 20 BC ajudando. Onde esse crédito aparece?',
+  promo: 'Sua próxima compra fica 5 BC mais barata. Como saber o valor cobrado?',
+  achado: 'Você achou o QR de outra pessoa. O que você faz?',
+  mutirao: 'Você anda 3 casas. Quem pode gastar o saldo da sua conta?',
+  pix: 'Seus pais mandaram 25 BC por Pix. Quem pode recarregar a sua conta?',
+  whatsapp: 'Você ganhou 10 BC. Quando você gasta, quem recebe o aviso?',
+  extratolink: 'Você ganhou 12 BC. Como os responsáveis veem todos os gastos?',
+  pulseira: 'Você ganhou 15 BC. Como o responsável sabe qual pulseira pagou?',
+  teto: 'Você tem 290 BC e chegam 20 BC. O que acontece?',
+  prepago: 'Você ganhou 10 BC. E se pagar 25 BC tendo só 20 BC?',
+  celular: 'Você perde uma rodada procurando o celular. Por que cuidar dele?',
+  lojista: 'Sua próxima compra custa 5 BC a mais. Como perceber um valor errado?',
+  ponte: 'A ponte quebrou e custa 8 BC. E se o saldo não cobrir?',
+  chuva: 'Você volta 2 casas na chuva. O que conferir antes de gastar?',
+  lona: 'A lona furou e custa 5 BC. Onde esse gasto fica registrado?',
+  machucado: 'O curativo custou 10 BC e você não reconhece. O que fazer?',
+  qrperdido: 'Você perdeu o QR de pagamento. O que fazer primeiro?',
+  semsaldo: 'Você perde uma rodada na fila. E se o pagamento não tiver saldo?',
+  recargarec: 'Você volta 2 casas. E se uma recarga passar de 300 BC?',
+  gastoestranho: 'Apareceu um gasto de 9 BC. Como saber qual pulseira pagou?',
+  extratotarde: 'Você perdeu 10 BC numa cobrança repetida. Quando conferir o extrato?',
+  avisoignorado: 'Você ignorou um aviso e perdeu 6 BC. Para que serve o aviso?',
+  salamutirao: 'Todos ganham 10 BC. Onde cada um confere o que entrou?',
+  salajanta: 'Quem tem Panela ganha 10 BC. E se você tem 295 BC?',
+  salachuva: 'Quem não tem Lona paga 5 BC. Veio um aviso de gasto: o que fazer?',
+  salaventania: 'Quem não tem Corda paga 5 BC. Sem saldo, o que a conta faz?',
+  salapix: 'Todos ganham 8 BC. Quem faz a recarga na conta de um jovem?',
+  salaextrato: 'Quem tem Mapa ganha 10 BC. Como os responsáveis recebem o extrato?',
+  salaaviso: 'Todos ganham 6 BC. Todo gasto avisa os responsáveis?',
+  salapulseira: 'Quem tem Bússola ganha 10 BC. Como separar gastos de duas pulseiras?',
+  salaqr: 'Quem não tem Lanterna paga 5 BC. Perderam um QR: o que a chefia faz?',
+  salarecusa: 'Sem Panela, paga 6 BC. Pagar 6 BC tendo 4 BC: o que acontece?',
+  salaconferencia: 'Quem não tem Mapa paga 4 BC. Onde conferir essa taxa?',
+  salatombo: 'Quem não tem Kit primeiros socorros paga 6 BC. Qual é o saldo máximo?',
+};
+for (const c of [...CARTAS, ...CARTAS_SALA]) c.curto = CURTOS[c.id];
+
+// Missão da sala (F6): uma por partida, igual para todos. Quem monta o conjunto de itens primeiro ganha pontos.
+export const MISSOES = [
+  { id: 'cozinha',  nome: 'Montar a cozinha',                    itens: ['panela', 'lona'] },
+  { id: 'luz',      nome: 'Acender a luz do acampamento',        itens: ['lanterna', 'corda'] },
+  { id: 'socorro',  nome: 'Montar o posto de primeiros socorros', itens: ['kitps', 'corda'] },
+  { id: 'rota',     nome: 'Traçar a rota da trilha',             itens: ['mapa', 'bussola'] },
+  { id: 'patrulha', nome: 'Equipar a patrulha de exploração',    itens: ['mapa', 'bussola', 'lanterna'] },
+  { id: 'barraca',  nome: 'Armar a barraca',                     itens: ['lona', 'corda', 'panela'] },
+];
+export function missaoDaPartida(seed) {
+  return { id: MISSOES[Math.floor(rngComSemente((seed ^ 0x1D2F) >>> 0)() * MISSOES.length)].id, vencedor: null };
+}
+export const missaoPorId = (id) => MISSOES.find((m) => m.id === id);
+export function descreverMissao(m) {
+  const d = missaoPorId(m.id), nomes = d.itens.map((i) => ITENS.find((x) => x.id === i).nome);
+  return `${d.nome} (${nomes.join(', ').replace(/, ([^,]*)$/, ' e $1')})`;
+}
+// Confere se alguém cumpriu a missão. Chamado depois de cada ação que muda um kit.
+export function conferirMissao(ctx) {
+  const m = ctx.missao;
+  if (!m || m.vencedor != null) return null;
+  const d = missaoPorId(m.id);
+  for (const [id, st] of ctx.estados) {
+    if (st.fim || !d.itens.every((i) => st.kit.includes(i))) continue;
+    m.vencedor = id;
+    st.missaoPts = MISSAO_PTS;
+    aviso(st, 'ok', `Missão cumprida primeiro: ${d.nome}! +${MISSAO_PTS} pts no fim.`);
+    st.cena.push({ t: 'missao', nome: d.nome });
+    for (const [oid, o] of ctx.estados) if (oid !== id) aviso(o, 'info', `${st.apelido} cumpriu a missão da sala primeiro: ${d.nome}.`);
+    return id;
+  }
+  return null;
+}
+
 // Metas secretas (B3): cada jogador recebe uma e só a vê completa no fim. Premiam gastar com cuidado.
 export const METAS = [
   { id: 'poupador',  nome: 'Termine com 80 BC ou mais', pts: 15, ok: (st) => st.saldo >= 80 },
@@ -465,9 +543,9 @@ export function novoJogador({ apelido, ficha, rodadas = RODADAS_PADRAO, seed = 1
     rolou: false, feito: false, dado: null, pend: null, resposta: null, ultimo: null,
     fim: false, fogo: 0,
     meta: metaDoJogador(seed, ordem),
-    stats: { cartas: 0, kitCompletoRodada: null, gratificacoes: 0, protecoes: 0, creditosRecusados: 0, minSaldo: SALDO_INICIAL, maxSaldo: SALDO_INICIAL, recusas: 0, perdidas: 0, ajudas: 0, duplos: 0, lojas: [], lanterna: null },
+    stats: { trocas: 0, cartas: 0, kitCompletoRodada: null, gratificacoes: 0, protecoes: 0, creditosRecusados: 0, minSaldo: SALDO_INICIAL, maxSaldo: SALDO_INICIAL, recusas: 0, perdidas: 0, ajudas: 0, duplos: 0, lojas: [], lanterna: null },
     agenda: agendaDaPartida(seed, rodadas),
-    duploGratis: 0, canivete: false, acertosNoite: 0, acoesRodada: 0,
+    duploGratis: 0, canivete: false, acertosNoite: 0, acoesRodada: 0, missaoPts: 0, oferta: null,
     baralho: montarBaralho(seed, sala, vistas), sacadas: [],
     extrato: [{ d: 'Saldo inicial', v: SALDO_INICIAL, s: SALDO_INICIAL }],
     avisos: [{ tipo: 'info', texto: `Bem-vindo, ${apelido}! Sua conta BadenCoin começa com ${SALDO_INICIAL} BC.` }],
@@ -599,6 +677,9 @@ function resolverCasa(st, rng) {
   } else if (casa === 'perdido') {
     // B5: a Lanterna mostra o caminho, e o jogador segue sem pagar.
     if (!protegido(st, 'lanterna', 'você não se perdeu na trilha')) st.pend = { tipo: 'perdido', valor: PERDIDO_TAXA };
+  } else if (casa === 'troca') {
+    if (st.kit.length) st.pend = { tipo: 'troca' };
+    else aviso(st, 'info', 'Feira de Trocas: você ainda não tem itens para trocar.');
   } else if (casa === 'bussola' || casa === 'tempestade') {
     st.pend = { tipo: 'carta', carta: sacarCarta(st, casa, rng) };
   }
@@ -719,6 +800,67 @@ export function sairDaLoja(st) {
   return { ok: true };
 }
 
+// ---------- Feira de Trocas (A7) ----------
+// Troca de item por item: nenhum BC muda de conta, porque a carteira real não tem pagamento entre participantes.
+const itemPorId = (id) => ITENS.find((i) => i.id === id);
+function trocaInvalida(st, dar, querer) {
+  if (!st.pend || st.pend.tipo !== 'troca') return 'Você não está na Feira de Trocas.';
+  if (!itemPorId(dar) || !itemPorId(querer) || dar === querer) return 'Escolha um item seu e um item diferente para receber.';
+  if (!st.kit.includes(dar)) return 'Você só pode trocar um item que está no seu kit.';
+  if (st.kit.includes(querer)) return 'Você já tem esse item.';
+  return null;
+}
+function passarItem(st, saiu, entrou) {
+  st.kit = st.kit.map((i) => (i === saiu ? entrou : i));
+  st.stats.trocas += 1;
+  st.cena.push({ t: 'troca', dar: saiu, querer: entrou });
+}
+// O baú da Feira troca na hora, por um item que custa o mesmo ou menos.
+export function trocarNoBau(st, dar, querer) {
+  const erro = trocaInvalida(st, dar, querer);
+  if (erro) return { erro };
+  const a = itemPorId(dar), b = itemPorId(querer);
+  if (b.preco > a.preco) return { erro: 'No baú da Feira só dá para trocar por um item que custa o mesmo ou menos.' };
+  passarItem(st, dar, querer);
+  aviso(st, 'ok', `Troca no baú: ${a.nome} por ${b.nome}. Nenhum BC mudou de conta.`);
+  st.pend = null; st.feito = true; st.ultimo = `Trocou ${a.nome} por ${b.nome} no baú da Feira.`;
+  return { ok: true };
+}
+// Numa sala, o jogador oferece o item aos outros: quem aceitar primeiro faz a troca.
+export function oferecerTroca(st, dar, querer, ctx) {
+  if (!ctx?.ofertas) return { erro: 'Só dá para oferecer a troca numa sala, com outros jogadores.' };
+  const erro = trocaInvalida(st, dar, querer);
+  if (erro) return { erro };
+  st.oferta = { dar, querer, rodada: st.rodada };
+  aviso(st, 'info', `Você ofereceu ${itemPorId(dar).nome} por ${itemPorId(querer).nome} na Feira de Trocas.`);
+  st.cena.push({ t: 'oferta', dar, querer });
+  st.pend = null; st.feito = true; st.ultimo = `Ofereceu ${itemPorId(dar).nome} por ${itemPorId(querer).nome}.`;
+  return { ok: true };
+}
+export function sairDaTroca(st) {
+  if (!st.pend || st.pend.tipo !== 'troca') return { erro: 'Você não está na Feira de Trocas.' };
+  st.pend = null; st.feito = true; st.ultimo = 'Saiu da Feira de Trocas sem trocar.';
+  return { ok: true };
+}
+// Uma oferta vale na rodada em que foi feita e na seguinte.
+export const ofertaAtiva = (st) => !!st.oferta && !st.fim && st.rodada <= st.oferta.rodada + 1;
+export function podeAceitar(aceita, ofertante) {
+  if (!ofertaAtiva(ofertante) || aceita === ofertante || aceita.fim) return false;
+  const { dar, querer } = ofertante.oferta;
+  return aceita.kit.includes(querer) && !aceita.kit.includes(dar) && ofertante.kit.includes(dar) && !ofertante.kit.includes(querer);
+}
+export function aceitarTroca(st, msg, ctx) {
+  const o = ctx.estados.get(msg.de);
+  if (!o || !podeAceitar(st, o)) return { erro: 'Essa oferta não está mais disponível para você.' };
+  const { dar, querer } = o.oferta, a = itemPorId(dar), b = itemPorId(querer);
+  passarItem(o, dar, querer);
+  passarItem(st, querer, dar);
+  o.oferta = null;
+  aviso(o, 'ok', `${st.apelido} aceitou a sua oferta: você trocou ${a.nome} por ${b.nome}.`);
+  aviso(st, 'ok', `Troca com ${o.apelido}: você deu ${b.nome} e recebeu ${a.nome}. Nenhum BC mudou de conta.`);
+  return { ok: true };
+}
+
 // A2: efeito de uma carta que vale para a sala toda. `estados` são os jogadores da sala.
 export function cartaDeSala(estados, quem, c, ok) {
   for (const alvo of estados) {
@@ -815,6 +957,7 @@ export function tempoEsgotado(st, rng = Math.random, ctx = null, id = null) {
   if (ctx) assumirPonte(ctx.pontes, id, st);
   if (st.pend) {
     if (st.pend.tipo === 'loja') sairDaLoja(st);
+    else if (st.pend.tipo === 'troca') sairDaTroca(st);
     else if (st.pend.tipo === 'carta') responder(st, -1, rng, ctx ? [...ctx.estados.values()] : null);
     else if (st.pend.tipo === 'pedagio') pagar(st, ctx?.estados.get(st.pend.guardiao) || null);
     else if (st.pend.tipo === 'perdido') { if (st.saldo >= st.pend.valor) pagar(st); else arriscar(st, rng); }
@@ -914,8 +1057,8 @@ export function pontuacao(st) {
   const saldo = Math.floor(st.saldo / 10);
   // A meta secreta só conta quando a partida acaba, para não entregar a meta pelo placar.
   const meta = st.fim && metaCumprida(st) ? METAS.find((m) => m.id === st.meta).pts : 0;
-  const canivete = st.canivete ? CANIVETE_PTS : 0;
-  return { itens, kitCompleto, cartas, saldo, meta, canivete, total: itens + kitCompleto + cartas + saldo + meta + canivete };
+  const canivete = st.canivete ? CANIVETE_PTS : 0, missao = st.missaoPts || 0;
+  return { itens, kitCompleto, cartas, saldo, meta, canivete, missao, total: itens + kitCompleto + cartas + saldo + meta + canivete + missao };
 }
 
 // Ordena o placar: pontos; desempate por saldo final e depois por cartas acertadas.
@@ -1022,6 +1165,10 @@ const ACOES_MOTOR = {
   responder: (st, m, rng, ctx) => responder(st, Number(m.i), rng, [...ctx.estados.values()]),
   pagar: (st, m, rng, ctx) => pagar(st, st.pend?.tipo === 'pedagio' ? ctx.estados.get(st.pend.guardiao) || null : null),
   arriscar: (st, m, rng) => arriscar(st, rng),
+  trocar_bau: (st, m) => trocarNoBau(st, String(m.dar), String(m.querer)),
+  oferecer_troca: (st, m, rng, ctx) => oferecerTroca(st, String(m.dar), String(m.querer), ctx),
+  sair_troca: (st) => sairDaTroca(st),
+  aceitar_troca: (st, m, rng, ctx) => aceitarTroca(st, m, ctx),
 };
 export const ACOES_DO_JOGO = Object.keys(ACOES_MOTOR);
 
@@ -1034,6 +1181,7 @@ export function agirNaSala(ctx, id, msg, rng = Math.random) {
   const r = fn(st, msg, rng, ctx);
   if (r.erro) return r;
   assumirPonte(ctx.pontes, id, st);
+  conferirMissao(ctx);
   const afetados = [...ctx.estados].filter(([k, s]) => k === id || s.cena.length !== antes.get(k)).map(([k]) => k);
   return { ok: true, afetados };
 }

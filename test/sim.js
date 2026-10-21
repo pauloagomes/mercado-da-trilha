@@ -2,7 +2,7 @@
 // Serve ao npm test (test/balanceamento.test.js) e ao comando `npm run simular`.
 // Recebe o módulo do motor por parâmetro para poder comparar com uma versão antiga.
 
-export const ETAPA = 3;
+export const ETAPA = 4;
 
 // Meta final (RFC) e faixa mínima que a etapa atual precisa cumprir.
 // `etapa` é a faixa que a etapa atual precisa cumprir; `lancamento` é a meta do RFC para ir ao ar.
@@ -36,7 +36,8 @@ export const SO_AJUDA = { ...REFERENCIA, duplo: false, ajuda: true, sempreAjuda:
 export function jogarPartida(E, politicas, { rodadas = 12, seed = 1, vistas = [] } = {}) {
   const rng = E.rngComSemente(seed * 7919 + 13);
   const sala = politicas.length > 1;
-  const ctx = E.novoContexto ? E.novoContexto(sala ? {} : null) : { estados: new Map() };
+  const ctx = E.novoContexto(sala ? {} : null);
+  if (sala) ctx.missao = E.missaoDaPartida(seed);
   politicas.forEach((_, i) => {
     ctx.estados.set(i, E.novoJogador({ apelido: `J${i}`, ficha: 'f01', rodadas, seed, ordem: i, sala, vistas }));
   });
