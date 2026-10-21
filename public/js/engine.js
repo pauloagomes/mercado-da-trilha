@@ -13,7 +13,7 @@ export const DADO_DUPLO_CUSTO = 5;
 export const AJUDA_GANHO = 15;
 export const GRATIFICACAO = 3;
 export const PTS_CARTA = 10;
-export const VERSAO_ESTADO = 3;
+export const VERSAO_ESTADO = 4;
 export const NOITE_RODADAS = 3;        // C4: nas últimas 3 rodadas créditos e acertos valem em dobro
 export const DESCONTO_FEIRA = 5;
 export const LANCES = [0, 10, 20, 30, 40];
@@ -149,6 +149,85 @@ export const CARTAS = [
     opcoes: ['Conferir o aviso de gasto e o extrato, e falar com a chefia', 'Esperar o fim do evento para reclamar', 'Pagar de novo para compensar'],
     certa: 0, porque: 'O aviso de gasto e o extrato mostram o que foi cobrado, na hora. Com isso a chefia confere o valor.',
     efeito: (st) => { if (!protegido(st, 'kitps', 'o curativo estava no kit')) pagarOuParar(st, 10, 'Curativo'); } },
+  // ---- F3: mais 6 cartas de Bússola e 6 de Tempestade, sobre o que a carteira de evento faz ----
+  { id: 'pix', tipo: 'bussola', titulo: 'Recarga por Pix',
+    historia: 'Os seus responsáveis fizeram uma recarga por Pix de 25 BC.',
+    pergunta: 'Quem põe dinheiro na sua conta durante o evento?',
+    opcoes: ['Os responsáveis, por Pix, pelo link da carteira', 'Só a chefia, em dinheiro vivo no caixa', 'Qualquer colega, pelo QR dele'],
+    certa: 0, porque: 'Os responsáveis recarregam por Pix e o valor entra na conta na hora, sem levar dinheiro vivo.',
+    app: 'No Trilha HUB, a recarga por Pix é feita pelos responsáveis.',
+    efeito: (st) => creditar(st, 25, 'Recarga dos responsáveis por Pix') },
+  { id: 'whatsapp', tipo: 'bussola', titulo: 'Bônus de pontualidade',
+    historia: 'Você chegou na hora à formatura e ganhou 10 BC.',
+    pergunta: 'Quando você gasta no evento, quem recebe o aviso?',
+    opcoes: ['Os responsáveis, no WhatsApp, com valor e saldo', 'Só o caixa do evento, no fim do dia', 'Ninguém: só você vê no extrato'],
+    certa: 0, porque: 'O aviso de gasto chega na hora ao WhatsApp dos responsáveis, com o valor e o saldo.',
+    app: 'No Trilha HUB, cada gasto avisa os responsáveis no WhatsApp.',
+    efeito: (st) => creditar(st, 10, 'Bônus de pontualidade') },
+  { id: 'extratolink', tipo: 'bussola', titulo: 'Extrato no bolso',
+    historia: 'Você guardou o extrato do dia e ganhou 12 BC pela boa organização.',
+    pergunta: 'Como os responsáveis veem todos os gastos do acampamento?',
+    opcoes: ['Por um link de extrato enviado no WhatsApp', 'Pedindo o papel do extrato ao caixa', 'Só olhando o celular do jovem'],
+    certa: 0, porque: 'O extrato completo vai por link no WhatsApp, e cada movimentação aparece com o saldo depois dela.',
+    app: 'No Trilha HUB, o extrato completo chega por link no WhatsApp.',
+    efeito: (st) => creditar(st, 12, 'Prêmio de organização') },
+  { id: 'pulseira', tipo: 'bussola', titulo: 'Pulseira nova',
+    historia: 'A chefia vinculou a sua pulseira à conta e deu 15 BC de boas-vindas.',
+    pergunta: 'Você paga com a pulseira. Como o responsável sabe qual foi usada?',
+    opcoes: ['O aviso de gasto mostra o apelido da pulseira', 'O aviso mostra só o valor', 'O aviso mostra só o nome do lojista'],
+    certa: 0, porque: 'Cada pulseira vinculada tem um apelido, e ele aparece no aviso de gasto.',
+    app: 'No Trilha HUB, cada pulseira vinculada aparece no aviso de gasto com o apelido dela.',
+    efeito: (st) => creditar(st, 15, 'Boas-vindas da pulseira') },
+  { id: 'teto', tipo: 'bussola', titulo: 'Sobra do patrulheiro',
+    historia: 'O seu patrulheiro devolveu uma sobra e mandou 20 BC para a sua conta.',
+    pergunta: 'Você tem 290 BC e chega um crédito de 20 BC. O que acontece?',
+    opcoes: ['O crédito é recusado inteiro', 'Entram só 10 BC, até o limite', 'O limite da conta sobe para 310 BC'],
+    certa: 0, porque: 'O saldo máximo é 300 BC. Um crédito que passaria do limite é recusado inteiro, e o aviso explica o motivo.',
+    efeito: (st) => creditar(st, 20, 'Sobra devolvida pelo patrulheiro') },
+  { id: 'prepago', tipo: 'bussola', titulo: 'Economia premiada',
+    historia: 'A chefia premiou quem economizou: você ganha 10 BC.',
+    pergunta: 'Você tenta pagar 25 BC com 20 BC de saldo. O que acontece?',
+    opcoes: ['O pagamento é recusado: a conta é pré-paga', 'O pagamento passa e o saldo fica negativo', 'O pagamento passa e a diferença é cobrada depois'],
+    certa: 0, porque: 'A conta é pré-paga: sem saldo, o pagamento é recusado e o motivo aparece.',
+    efeito: (st) => creditar(st, 10, 'Prêmio de economia') },
+  { id: 'qrperdido', tipo: 'tempestade', titulo: 'QR perdido',
+    historia: 'Você perdeu o QR no caminho e passa a próxima rodada esperando um novo.',
+    pergunta: 'Você perdeu o QR de pagamento. O que fazer primeiro?',
+    opcoes: ['Avisar a chefia para bloquear o QR', 'Esperar alguém achar e devolver', 'Gastar o saldo antes que usem'],
+    certa: 0, porque: 'A chefia bloqueia o QR perdido e o saldo fica protegido. Depois a conta recebe outro QR.',
+    app: 'No Trilha HUB, a chefia bloqueia o QR perdido pelo painel do evento.',
+    efeito: (st) => { st.skip = Math.max(st.skip, 1); aviso(st, 'alerta', 'Você perdeu o QR e vai passar a próxima rodada esperando um novo.'); } },
+  { id: 'semsaldo', tipo: 'tempestade', titulo: 'Fila da cantina',
+    historia: 'A fila da cantina estava enorme e você perde a próxima rodada.',
+    pergunta: 'O seu pagamento é recusado por falta de saldo. O que a conta faz?',
+    opcoes: ['Recusa o pagamento e mostra o motivo', 'Aprova e deixa o saldo negativo', 'Aprova e cobra na próxima recarga'],
+    certa: 0, porque: 'A conta é pré-paga: sem saldo, o pagamento é recusado e o aviso diz por quê.',
+    efeito: (st) => { st.skip = Math.max(st.skip, 1); aviso(st, 'alerta', 'Você ficou na fila da cantina e vai perder a próxima rodada.'); } },
+  { id: 'recargarec', tipo: 'tempestade', titulo: 'Recarga recusada',
+    historia: 'Uma recarga ficou presa no Pix e você volta 2 casas esperando.',
+    pergunta: 'Uma recarga por Pix passaria de 300 BC. O que acontece?',
+    opcoes: ['A recarga é recusada inteira', 'Entra só até 300 BC e o resto volta por Pix', 'Entra tudo e a conta passa de 300 BC'],
+    certa: 0, porque: 'O saldo máximo é 300 BC. A recarga que passaria do limite é recusada inteira.',
+    app: 'A carteira de evento do Trilha HUB tem saldo máximo por participante.',
+    efeito: (st) => andar(st, -2, false) },
+  { id: 'gastoestranho', tipo: 'tempestade', titulo: 'Gasto estranho',
+    historia: 'Apareceu um gasto de 9 BC que você não lembra, e a chefia precisou conferir.',
+    pergunta: 'No aviso de gasto, como saber qual pulseira foi usada?',
+    opcoes: ['O aviso traz o apelido da pulseira', 'O aviso traz só o valor', 'O aviso traz só o nome do lojista'],
+    certa: 0, porque: 'O aviso de gasto traz o valor, o saldo e o apelido da pulseira ou do QR que pagou.',
+    efeito: (st) => pagarOuParar(st, 9, 'Gasto conferido pela chefia') },
+  { id: 'extratotarde', tipo: 'tempestade', titulo: 'Extrato conferido tarde',
+    historia: 'Você só conferiu o extrato no fim e perdeu uma cobrança repetida: 10 BC.',
+    pergunta: 'Quando conferir o extrato para pegar uma cobrança repetida?',
+    opcoes: ['Logo depois do aviso de gasto, na hora', 'Só no último dia do evento', 'Só quando o saldo acabar'],
+    certa: 0, porque: 'O aviso chega na hora e o extrato mostra cada movimentação. Conferir na hora é o jeito de pegar erros.',
+    efeito: (st) => pagarOuParar(st, 10, 'Cobrança repetida') },
+  { id: 'avisoignorado', tipo: 'tempestade', titulo: 'Aviso ignorado',
+    historia: 'Você ignorou um aviso de gasto e uma cobrança passou: 6 BC.',
+    pergunta: 'Os responsáveis recebem um aviso a cada gasto. Para que serve?',
+    opcoes: ['Para conferir na hora se o gasto era esperado', 'Para aprovar cada gasto antes de ele acontecer', 'Para bloquear a conta quando o saldo baixa'],
+    certa: 0, porque: 'O aviso chega depois do gasto, com valor e saldo, para conferir na hora se era esperado.',
+    efeito: (st) => pagarOuParar(st, 6, 'Cobrança não conferida') },
 ];
 
 // Cartas de sala (A2): valem para todos os jogadores da sala e só saem em salas, nunca no jogo sozinho.
@@ -179,6 +258,54 @@ export const CARTAS_SALA = [
     opcoes: ['Recusa o pagamento: não existe saldo negativo', 'Deixa o saldo negativo para pagar depois', 'Pede emprestado a um colega'],
     certa: 0, porque: 'A conta é pré-paga: sem saldo, o pagamento é recusado.',
     efeitoSala: (alvo) => { if (!alvo.kit.includes('corda')) cobrarDaSala(alvo, 5, 'Estragos da ventania'); } },
+  { id: 'salapix', tipo: 'bussola', sala: true, titulo: 'Recarga coletiva',
+    historia: 'Os pais fizeram uma recarga coletiva por Pix: cada conta recebe 8 BC. Quem tirou a carta ganha mais 5 BC.',
+    pergunta: 'Quem faz a recarga na conta de um jovem?',
+    opcoes: ['Os responsáveis, por Pix', 'Só a chefia, em dinheiro', 'O próprio jovem, pelo celular do colega'],
+    certa: 0, porque: 'Os responsáveis recarregam por Pix e o valor entra na conta na hora.',
+    efeitoSala: (alvo) => creditar(alvo, 8, 'Recarga coletiva dos pais') },
+  { id: 'salaextrato', tipo: 'bussola', sala: true, titulo: 'Dia de extrato',
+    historia: 'Quem tem Mapa organizou o acampamento e ganha 10 BC. Quem tirou a carta ganha mais 5 BC.',
+    pergunta: 'Como os responsáveis recebem o extrato do evento?',
+    opcoes: ['Por um link enviado no WhatsApp', 'Pedindo uma cópia ao caixa', 'Só no fim do evento, por e-mail'],
+    certa: 0, porque: 'O extrato completo chega por link no WhatsApp.',
+    efeitoSala: (alvo) => { if (alvo.kit.includes('mapa')) creditar(alvo, 10, 'Organização do acampamento'); } },
+  { id: 'salaaviso', tipo: 'bussola', sala: true, titulo: 'Aviso para todos',
+    historia: 'A chefia mandou um aviso e cada conta ganha 6 BC de brinde. Quem tirou a carta ganha mais 5 BC.',
+    pergunta: 'Um gasto seu apareceu no WhatsApp dos seus responsáveis. Isso é normal?',
+    opcoes: ['Sim: cada gasto gera um aviso com valor e saldo', 'Não: só gastos acima de 50 BC geram aviso', 'Não: o aviso só vai para a chefia'],
+    certa: 0, porque: 'Todo gasto gera um aviso aos responsáveis, com o valor e o saldo.',
+    efeitoSala: (alvo) => creditar(alvo, 6, 'Brinde da chefia') },
+  { id: 'salapulseira', tipo: 'bussola', sala: true, titulo: 'Pulseiras em dia',
+    historia: 'Quem tem Bússola não se perdeu e ganha 10 BC. Quem tirou a carta ganha mais 5 BC.',
+    pergunta: 'Duas pulseiras pagaram na mesma cantina. Como separar os gastos?',
+    opcoes: ['Cada aviso mostra o apelido da pulseira usada', 'Os gastos se misturam no mesmo aviso', 'O caixa descobre depois, pelo horário'],
+    certa: 0, porque: 'Cada pulseira vinculada tem um apelido, e ele aparece no aviso de gasto.',
+    efeitoSala: (alvo) => { if (alvo.kit.includes('bussola')) creditar(alvo, 10, 'Caminho certo com a Bússola'); } },
+  { id: 'salaqr', tipo: 'tempestade', sala: true, titulo: 'Blecaute no caixa',
+    historia: 'Faltou luz no caixa: quem não tem Lanterna paga 5 BC. Quem tirou a carta ganha 5 BC.',
+    pergunta: 'Um QR foi perdido no meio do blecaute. O que a chefia faz?',
+    opcoes: ['Bloqueia o QR e a conta recebe outro', 'Espera o dono voltar para achar', 'Apaga o saldo da conta'],
+    certa: 0, porque: 'A chefia bloqueia o QR perdido, o saldo fica protegido e a conta recebe outro QR.',
+    efeitoSala: (alvo) => { if (!alvo.kit.includes('lanterna')) cobrarDaSala(alvo, 5, 'Blecaute no caixa'); } },
+  { id: 'salarecusa', tipo: 'tempestade', sala: true, titulo: 'Fila na cantina',
+    historia: 'A cantina lotou: quem não tem Panela paga 6 BC pelo lanche. Quem tirou a carta ganha 5 BC.',
+    pergunta: 'Você quer pagar 6 BC e tem 4 BC. O que a conta faz?',
+    opcoes: ['Recusa o pagamento e mostra o motivo', 'Aprova e deixa 2 BC negativos', 'Aprova só metade do valor'],
+    certa: 0, porque: 'A conta é pré-paga: sem saldo, o pagamento é recusado inteiro.',
+    efeitoSala: (alvo) => { if (!alvo.kit.includes('panela')) cobrarDaSala(alvo, 6, 'Lanche na fila da cantina'); } },
+  { id: 'salaconferencia', tipo: 'tempestade', sala: true, titulo: 'Conferência geral',
+    historia: 'A chefia conferiu as contas: quem não tem Mapa paga 4 BC de taxa de inscrição. Quem tirou a carta ganha 5 BC.',
+    pergunta: 'Onde você confere o que foi cobrado numa taxa como essa?',
+    opcoes: ['No extrato, que mostra cada movimentação', 'Só no aviso de gasto, que some depois', 'Só perguntando à chefia'],
+    certa: 0, porque: 'O extrato mostra cada movimentação e o saldo depois dela.',
+    efeitoSala: (alvo) => { if (!alvo.kit.includes('mapa')) cobrarDaSala(alvo, 4, 'Taxa de inscrição'); } },
+  { id: 'salatombo', tipo: 'tempestade', sala: true, titulo: 'Tombo coletivo',
+    historia: 'Uma corrida na trilha deu vários tombos: quem não tem Kit primeiros socorros paga 6 BC de curativo. Quem tirou a carta ganha 5 BC.',
+    pergunta: 'Qual é o saldo máximo de uma conta no evento?',
+    opcoes: ['300 BC', '500 BC', 'Não há limite'],
+    certa: 0, porque: 'O saldo máximo é 300 BC por participante.',
+    efeitoSala: (alvo) => { if (!alvo.kit.includes('kitps')) cobrarDaSala(alvo, 6, 'Curativo do tombo coletivo'); } },
 ];
 
 // Metas secretas (B3): cada jogador recebe uma e só a vê completa no fim. Premiam gastar com cuidado.
@@ -289,6 +416,31 @@ export function cartaMostrada(st, id) {
   return { ...c, opcoes: ordem.map((k) => c.opcoes[k]), certa: ordem.indexOf(c.certa) };
 }
 
+// F3: cada jogador tem o seu baralho por tipo de carta, embaralhado pela semente: nenhuma carta se repete
+// até o baralho acabar. `vistas` (as cartas das últimas partidas, da mais antiga para a mais nova) vão para o
+// fim, para quem joga várias partidas seguidas não ver sempre as mesmas.
+function embaralhar(lista, rng) {
+  const l = [...lista];
+  for (let i = l.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [l[i], l[j]] = [l[j], l[i]]; }
+  return l;
+}
+export function montarBaralho(seed, sala, vistas = []) {
+  const baralhos = {};
+  for (const tipo of ['bussola', 'tempestade']) {
+    const ids = [...CARTAS, ...(sala ? CARTAS_SALA : [])].filter((c) => c.tipo === tipo).map((c) => c.id);
+    const ordem = embaralhar(ids, rngComSemente((seed ^ hashTexto(`baralho-${tipo}`)) >>> 0));
+    const pos = (id) => vistas.lastIndexOf(id);
+    baralhos[tipo] = [...ordem.filter((id) => pos(id) < 0), ...ordem.filter((id) => pos(id) >= 0).sort((a, b) => pos(a) - pos(b))];
+  }
+  return baralhos;
+}
+function sacarCarta(st, tipo, rng) {
+  if (!st.baralho[tipo].length) st.baralho[tipo] = embaralhar(baralho(st, tipo).map((c) => c.id), rng);
+  const id = st.baralho[tipo].shift();
+  st.sacadas.push(id);
+  return id;
+}
+
 // B3: cada jogador da sala recebe uma meta diferente (até 12), na ordem embaralhada pela semente.
 export function metaDoJogador(seed, ordem) {
   const r = rngComSemente((seed ^ 0x9E3779B9) >>> 0);
@@ -305,7 +457,7 @@ export function metaCumprida(st) {
 }
 
 // ---------- Estado de um jogador ----------
-export function novoJogador({ apelido, ficha, rodadas = RODADAS_PADRAO, seed = 1, ordem = 0, sala = false }) {
+export function novoJogador({ apelido, ficha, rodadas = RODADAS_PADRAO, seed = 1, ordem = 0, sala = false, vistas = [] }) {
   return {
     v: VERSAO_ESTADO, apelido, ficha, rodadas, seed, sala,
     pos: 0, rodada: 0, saldo: SALDO_INICIAL, kit: [], acertos: 0,
@@ -313,9 +465,10 @@ export function novoJogador({ apelido, ficha, rodadas = RODADAS_PADRAO, seed = 1
     rolou: false, feito: false, dado: null, pend: null, resposta: null, ultimo: null,
     fim: false, fogo: 0,
     meta: metaDoJogador(seed, ordem),
-    stats: { creditosRecusados: 0, minSaldo: SALDO_INICIAL, maxSaldo: SALDO_INICIAL, recusas: 0, perdidas: 0, ajudas: 0, duplos: 0, lojas: [], lanterna: null },
+    stats: { cartas: 0, kitCompletoRodada: null, gratificacoes: 0, protecoes: 0, creditosRecusados: 0, minSaldo: SALDO_INICIAL, maxSaldo: SALDO_INICIAL, recusas: 0, perdidas: 0, ajudas: 0, duplos: 0, lojas: [], lanterna: null },
     agenda: agendaDaPartida(seed, rodadas),
-    duploGratis: 0, canivete: false, acertosNoite: 0,
+    duploGratis: 0, canivete: false, acertosNoite: 0, acoesRodada: 0,
+    baralho: montarBaralho(seed, sala, vistas), sacadas: [],
     extrato: [{ d: 'Saldo inicial', v: SALDO_INICIAL, s: SALDO_INICIAL }],
     avisos: [{ tipo: 'info', texto: `Bem-vindo, ${apelido}! Sua conta BadenCoin começa com ${SALDO_INICIAL} BC.` }],
     saida: [], // movimentos e jogadas novos, para o servidor gravar (o navegador ignora)
@@ -383,6 +536,7 @@ function pagarOuParar(st, valor, d) {
 function protegido(st, itemId, motivo) {
   if (!st.kit.includes(itemId)) return false;
   const item = ITENS.find((i) => i.id === itemId);
+  st.stats.protecoes += 1;
   aviso(st, 'ok', `${item.nome} protegeu você: ${motivo}.`);
   st.cena.push({ t: 'protegeu', item: itemId });
   return true;
@@ -446,8 +600,7 @@ function resolverCasa(st, rng) {
     // B5: a Lanterna mostra o caminho, e o jogador segue sem pagar.
     if (!protegido(st, 'lanterna', 'você não se perdeu na trilha')) st.pend = { tipo: 'perdido', valor: PERDIDO_TAXA };
   } else if (casa === 'bussola' || casa === 'tempestade') {
-    const pool = baralho(st, casa);
-    st.pend = { tipo: 'carta', carta: pool[Math.floor(rng() * pool.length)].id };
+    st.pend = { tipo: 'carta', carta: sacarCarta(st, casa, rng) };
   }
   st.feito = !st.pend;
 }
@@ -551,6 +704,7 @@ export function comprar(st, ids) {
   if (itens.some((i) => i.id === 'lanterna') && st.stats.lanterna == null) st.stats.lanterna = rodadaAtual(st);
   st.desconto = 0; st.extra = 0;
   if (st.kit.length === ITENS.length) {
+    st.stats.kitCompletoRodada = rodadaAtual(st);
     aviso(st, 'ok', 'Kit de Acampamento completo! +20 pts.');
     st.cena.push({ t: 'kit' });
   }
@@ -584,6 +738,7 @@ export function responder(st, i, rng = Math.random, estados = null) {
   if (!st.pend || st.pend.tipo !== 'carta') return { erro: 'Não há carta para responder.' };
   const c = cartaMostrada(st, st.pend.carta);
   const ok = i === c.certa;
+  st.stats.cartas += 1;
   if (ok) { st.acertos += 1; if (noite(st)) st.acertosNoite += 1; }
   st.pend = null; st.feito = true;
   // B4: acertar uma carta de Tempestade evita o revés.
@@ -603,6 +758,7 @@ export function pagarPedagio(pagador, guardiao) {
   if (!debitar(pagador, valor, 'Pedágio da Ponte (caixa do evento)', 'pedagio')) return false;
   if (guardiao && guardiao !== pagador && !guardiao.fim) {
     if (creditar(guardiao, GRATIFICACAO, `Gratificação de guardião: pedágio pago por ${pagador.apelido}`, 'gratificacao')) {
+      guardiao.stats.gratificacoes += 1;
       guardiao.cena.push({ t: 'gratificacao', de: pagador.apelido });
     }
   }
@@ -715,7 +871,7 @@ function comecarRodada(st) {
 // Fecha a rodada do jogador. Devolve false se ele ainda não terminou a jogada.
 export function fecharRodada(st) {
   if (!st.feito || st.fim) return false;
-  st.rodada += 1; st.rolou = false; st.feito = false;
+  st.rodada += 1; st.rolou = false; st.feito = false; st.acoesRodada = 0;
   if (st.rodada >= st.rodadas) {
     st.fim = true;
     aviso(st, 'info', 'Fim do mercado! A conta foi congelada e o que sobrou vira pontos.');
@@ -780,6 +936,73 @@ export function resumoPublico(st) {
 export function visaoPropria(st) {
   const { saida, ...resto } = st;
   return resto;
+}
+
+// ---------- Insígnias (E1) ----------
+// Conferidas quando a partida acaba. `pos` e `total` são a posição na mesa e o número de jogadores.
+export const INSIGNIAS = [
+  { id: 'contador',   nome: 'Contador esperto',    desc: 'Acertou todas as cartas da partida (3 ou mais).', ok: (st) => st.stats.cartas >= 3 && st.acertos === st.stats.cartas },
+  { id: 'kit8',       nome: 'Kit em 8 rodadas',    desc: 'Completou o Kit de Acampamento até a rodada 8.', ok: (st) => st.stats.kitCompletoRodada != null && st.stats.kitCompletoRodada <= 8 },
+  { id: 'poupador',   nome: 'Poupador',            desc: 'Terminou com 5 itens ou mais e 150 BC ou mais.', ok: (st) => st.kit.length >= 5 && st.saldo >= 150 },
+  { id: 'guardiao',   nome: 'Guardião da ponte',   desc: 'Ganhou 3 gratificações de pedágio.', ok: (st) => st.stats.gratificacoes >= 3 },
+  { id: 'semrecusa',  nome: 'Sem recusa',          desc: 'Nenhum pagamento recusado em 8 rodadas ou mais.', ok: (st) => st.stats.recusas === 0 && st.rodadas >= 8 },
+  { id: 'fogueiro',   nome: 'Fogueiro',            desc: 'Passou duas vezes pelo Fogo de Conselho.', ok: (st) => st.fogo >= 2 },
+  { id: 'cofre',      nome: 'Cofre cheio',         desc: 'Chegou a 250 BC ou mais.', ok: (st) => st.stats.maxSaldo >= 250 },
+  { id: 'leiloeiro',  nome: 'Canivete no bolso',   desc: 'Levou o Canivete no leilão.', ok: (st) => st.canivete },
+  { id: 'equipado',   nome: 'Bem equipado',        desc: 'Foi protegido por itens do kit 3 vezes.', ok: (st) => st.stats.protecoes >= 3 },
+  { id: 'missao',     nome: 'Missão cumprida',     desc: 'Cumpriu a meta secreta.', ok: (st) => metaCumprida(st) },
+  { id: 'dados',      nome: 'Mestre dos dados',    desc: 'Usou o dado duplo 4 vezes.', ok: (st) => st.stats.duplos >= 4 },
+  { id: 'campeao',    nome: 'Campeão da mesa',     desc: 'Terminou em 1º lugar numa mesa de 2 jogadores ou mais.', ok: (st, c) => c.total >= 2 && c.pos === 1 },
+];
+export function insigniasDaPartida(st, { pos = 0, total = 1 } = {}) {
+  return INSIGNIAS.filter((i) => i.ok(st, { pos, total })).map((i) => i.id);
+}
+
+// ---------- Mestre do mercado (C7) ----------
+// O anfitrião dispara um evento para a sala toda na hora, na rodada em que cada jogador estiver.
+export const MESTRE_EVENTOS = ['feira', 'chuva', 'visita'];
+export function aplicarEventoAgora(st, tipo, loja) {
+  if (st.fim || !MESTRE_EVENTOS.includes(tipo)) return false;
+  const ev = { rodada: rodadaAtual(st), tipo };
+  if (EVENTOS[tipo].loja) ev.loja = loja || LOJAS[0];
+  st.agenda.push(ev);
+  aplicarEvento(st, ev);
+  return true;
+}
+
+// ---------- Desafio do dia (E2) ----------
+// Todos jogam a mesma partida: mesma semente, mesmos eventos e cartas, e o dado de cada rodada sai da
+// semente, da rodada e da ordem da ação, não de quem jogou antes. `rodarDesafio` repete uma partida
+// ação por ação, e é assim que o servidor confere o resultado que o celular mandou.
+export function sementeDoDia(dia) { return (hashTexto(`mercado-${dia}`) % 2147483646) + 1; }
+export function rngDaAcao(st) {
+  return rngComSemente((Math.imul(st.seed, 2654435761) ^ Math.imul(st.rodada + 1, 40503) ^ Math.imul(st.acoesRodada + 1, 9973)) >>> 0);
+}
+export function novoDesafio(dia, { apelido = 'Jogador', ficha = 'f01' } = {}) {
+  const ctx = novoContexto(null);
+  ctx.estados.set('eu', novoJogador({ apelido, ficha, rodadas: RODADAS_PADRAO, seed: sementeDoDia(dia) }));
+  return ctx;
+}
+// Uma ação do desafio, já fechando a rodada quando o jogador termina.
+export function passoDoDesafio(ctx, msg) {
+  const st = ctx.estados.get('eu');
+  const r = agirNaSala(ctx, 'eu', msg, rngDaAcao(st));
+  if (r.erro) return r;
+  st.acoesRodada += 1;
+  if (st.feito) { fecharRodada(st); passarRodadasPerdidas(st); }
+  return r;
+}
+export function rodarDesafio(dia, acoes) {
+  if (!Array.isArray(acoes) || acoes.length > 400) return { erro: 'Lista de ações inválida.' };
+  const ctx = novoDesafio(dia), st = ctx.estados.get('eu');
+  for (const [i, m] of acoes.entries()) {
+    if (st.fim) return { erro: 'Ações depois do fim da partida.' };
+    if (!m || typeof m.t !== 'string' || !ACOES_DO_JOGO.includes(m.t)) return { erro: `Ação ${i + 1} inválida.` };
+    const r = passoDoDesafio(ctx, m);
+    if (r.erro) return { erro: `Ação ${i + 1}: ${r.erro}` };
+  }
+  if (!st.fim) return { erro: 'A partida não terminou.' };
+  return { st, pontos: pontuacao(st) };
 }
 
 // ---------- Motor da sala ----------

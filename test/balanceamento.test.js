@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as E from '../public/js/engine.js';
-import { ETAPA, FAIXAS, medirSolo, medirMesa, REFERENCIA, ESPERTO, SEM_ESCOLHAS, CUIDADOSO, SO_AJUDA, jogarPartida } from './sim.js';
+import { ETAPA, FAIXAS, medirSolo, medirMesa, medirRepeticao, REFERENCIA, ESPERTO, SEM_ESCOLHAS, CUIDADOSO, SO_AJUDA, jogarPartida } from './sim.js';
 
 const N = Number(process.env.SIM_PARTIDAS) || 1500;
 
@@ -14,7 +14,8 @@ function medir() {
   const solo = medirSolo(E, { n: N, politica: REFERENCIA });
   const mesa = medirMesa(E, { n: N, base: REFERENCIA });
   const antes = medirSolo(E, { n: N, politica: SEM_ESCOLHAS });
-  medidas = { solo, mesa, antes, todas: { semEscolha: solo.semEscolha, venceQuemSabe: mesa.venceQuemSabe, recusou: solo.recusou } };
+  const repeticao = medirRepeticao(E, { n: Math.min(N, 800) });
+  medidas = { solo, mesa, antes, todas: { semEscolha: solo.semEscolha, venceQuemSabe: mesa.venceQuemSabe, recusou: solo.recusou, repeticao, semComemoracao: solo.semComemoracao } };
   return medidas;
 }
 

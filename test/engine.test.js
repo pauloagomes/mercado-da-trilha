@@ -12,7 +12,8 @@ test('tabuleiro tem 20 casas com as quantidades do plano', () => {
     [c('partida'), c('agencia'), c('util'), c('exp'), c('enf'), c('pedagio'), c('bussola'), c('tempestade'), c('perdido'), c('fogo')],
     [1, 2, 3, 3, 2, 2, 2, 3, 1, 1],
   );
-  assert.equal(E.CARTAS.length, 12);
+  assert.equal(E.CARTAS.length + E.CARTAS_SALA.length, 36);
+  assert.equal(E.CARTAS.length, 24);
   assert.equal(E.ITENS.reduce((s, i) => s + i.preco, 0), 140);
   assert.equal(E.FICHAS.length, 12);
 });
@@ -174,13 +175,15 @@ test('B4: acertar Tempestade evita o revés e toda carta certa vale 10 pts', () 
   const novo = () => { const st = E.novoJogador({ apelido: 'Fê', ficha: 'f01', seed: 1 }); st.pos = 3; return st; };
   const certa = (st) => E.cartaMostrada(st, st.pend.carta).certa;
   const a = novo();
-  E.rolar(a, seq(dado(1), 0.5)); // casa 4 = Tempestade; 0.5 sorteia a "Ponte quebrada" (8 BC)
+  a.baralho.tempestade.unshift('ponte');
+  E.rolar(a, seq(dado(1), 0.5)); // casa 4 = Tempestade; sai a "Ponte quebrada" (8 BC)
   assert.equal(E.cartaPorId(a.pend.carta).tipo, 'tempestade');
   E.responder(a, certa(a));
   assert.equal(a.saldo, 100);
   assert.equal(a.resposta.evitou, true);
   assert.equal(E.pontuacao(a).cartas, 10);
   const b = novo();
+  b.baralho.tempestade.unshift('ponte');
   E.rolar(b, seq(dado(1), 0.5));
   const pior = [0, 1, 2].find((i) => i !== certa(b));
   E.responder(b, pior);
@@ -463,4 +466,131 @@ test('F2: nenhuma carta tem alternativa absurda', () => {
     assert.equal(c.opcoes.length, 3, c.id);
     for (const o of c.opcoes) assert.ok(!absurdas.test(o), `${c.id}: "${o}"`);
   }
+});
+
+// ---------- Etapa 3 ----------
+const todas = () => [...E.CARTAS, ...E.CARTAS_SALA];
+
+test('F3: 36 cartas, 12 de cada tipo, todas bem formadas', () => {
+  const por = (f) => todas().filter(f).length;
+  assert.equal(por((c) => !c.sala && c.tipo === 'bussola'), 12);
+  assert.equal(por((c) => !c.sala && c.tipo === 'tempestade'), 12);
+  assert.equal(por((c) => c.sala), 12);
+  assert.equal(por((c) => c.sala && c.tipo === 'bussola'), 6);
+  assert.equal(new Set(todas().map((c) => c.id)).size, 36);
+  for (const c of todas()) {
+    assert.equal(c.opcoes.length, 3, c.id);
+    assert.ok([0, 1, 2].includes(c.certa), c.id);
+    assert.ok(c.titulo && c.historia && c.pergunta && c.porque, c.id);
+    assert.equal(new Set(c.opcoes).size, 3, `${c.id}: opções repetidas`);
+    const st = jogo({ sala: true, kit: [] });
+    if (c.sala) c.efeitoSala(st, true); else c.efeito(st, true, seq(0.5));
+    assert.ok(st.saldo >= 0 && st.saldo <= E.SALDO_MAX, c.id);
+  }
+});
+
+test('F3: o baralho não repete carta até acabar e se refaz sozinho', () => {
+  const st = jogo({ sala: false });
+  assert.equal(E.baralho(st, 'bussola').length, 12);
+  assert.equal(E.baralho({ ...st, sala: true }, 'bussola').length, 18);
+  const vistos = new Set();
+  for (let i = 0; i < 12; i++) {
+    st.pos = 1; st.pend = null; st.rolou = false;
+    E.rolar(st, seq(dado(1))); // casa 2 = Bússola
+    assert.ok(!vistos.has(st.pend.carta), 'repetiu antes de acabar o baralho');
+    vistos.add(st.pend.carta);
+    st.pos = 1;
+  }
+  assert.equal(vistos.size, 12);
+  st.pos = 1; st.rolou = false; st.pend = null;
+  E.rolar(st, seq(dado(1), 0.3, 0.6, 0.9, 0.1, 0.5, 0.7, 0.2, 0.8, 0.4, 0.05, 0.95, 0.15));
+  assert.ok(st.pend.carta, 'o baralho se refaz');
+  assert.equal(st.sacadas.length, 13);
+});
+
+test('F3: mesma semente, mesmo baralho; cartas vistas voltam por último', () => {
+  assert.deepEqual(E.montarBaralho(5, true, []), E.montarBaralho(5, true, []));
+  assert.notDeepEqual(E.montarBaralho(5, true, []).bussola, E.montarBaralho(6, true, []).bussola);
+  const base = E.montarBaralho(5, false, []).bussola;
+  const vistas = base.slice(0, 4);
+  const novo = E.montarBaralho(5, false, vistas).bussola;
+  assert.deepEqual(novo.slice(-4), vistas, 'as vistas vão para o fim, na ordem em que foram vistas');
+  assert.equal(novo.length, 12);
+});
+
+test('E1: 12 insígnias conferidas ao fim da partida', () => {
+  assert.equal(E.INSIGNIAS.length, 12);
+  assert.equal(new Set(E.INSIGNIAS.map((i) => i.id)).size, 12);
+  const st = jogo({ kit: ['corda', 'lona', 'panela', 'mapa', 'bussola'], saldo: 160, fim: true, acertos: 3 });
+  st.stats.cartas = 3; st.stats.recusas = 0; st.stats.maxSaldo = 260; st.stats.gratificacoes = 3; st.stats.duplos = 4;
+  st.stats.kitCompletoRodada = 7; st.canivete = true; st.fogo = 2; st.stats.protecoes = 3; st.meta = 'poupador';
+  const todos = E.insigniasDaPartida(st, { pos: 1, total: 4 });
+  assert.deepEqual(todos.sort(), E.INSIGNIAS.map((i) => i.id).sort(), 'esta partida ganha as 12');
+  const fraca = jogo({ fim: true });
+  fraca.stats.recusas = 2;
+  assert.deepEqual(E.insigniasDaPartida(fraca, { pos: 2, total: 4 }), []);
+  assert.ok(!E.insigniasDaPartida(st, { pos: 1, total: 1 }).includes('campeao'), 'campeão precisa de mesa');
+});
+
+test('C7: o Mestre dispara um evento na rodada em que o jogador estiver', () => {
+  const st = jogo({ agenda: [] });
+  avancar(st, 4);
+  assert.ok(E.aplicarEventoAgora(st, 'visita'));
+  assert.equal(st.saldo, 130);
+  assert.ok(E.aplicarEventoAgora(st, 'feira', 'enf'));
+  assert.equal(E.descontoFeira(st, 'enf'), 5);
+  avancar(st, 5);
+  assert.equal(E.descontoFeira(st, 'enf'), 5, 'a feira do Mestre dura 2 rodadas');
+  avancar(st, 6);
+  assert.equal(E.descontoFeira(st, 'enf'), 0);
+  assert.equal(E.aplicarEventoAgora(st, 'mutirao'), false, 'só os eventos liberados ao Mestre');
+  st.fim = true;
+  assert.equal(E.aplicarEventoAgora(st, 'chuva'), false);
+});
+
+// Joga uma partida do desafio do dia e devolve as ações, como o celular faria.
+function jogarDesafio(dia, escolha = 'rolar') {
+  const ctx = E.novoDesafio(dia), st = ctx.estados.get('eu'), acoes = [];
+  const faz = (m) => { const r = E.passoDoDesafio(ctx, m); assert.ok(r.ok, JSON.stringify([m, r])); acoes.push(m); };
+  for (let i = 0; i < 400 && !st.fim; i++) {
+    if (!st.rolou) faz({ t: escolha === 'duplo' && st.saldo >= 30 ? 'dado_duplo' : 'rolar' });
+    else if (st.pend?.tipo === 'dado') faz({ t: 'escolher_dado', i: 1 });
+    else if (st.pend?.tipo === 'loja') {
+      const it = E.ITENS.find((x) => x.loja === st.pend.loja && !st.kit.includes(x.id) && E.precoItem(st, x) + st.extra <= st.saldo);
+      faz(it ? { t: 'comprar', itens: [it.id] } : { t: 'sair_loja' });
+    } else if (st.pend?.tipo === 'carta') faz({ t: 'responder', i: 0 });
+    else if (st.pend?.tipo === 'perdido') faz({ t: 'arriscar' });
+    else faz({ t: 'pagar' });
+  }
+  return { st, acoes };
+}
+
+test('E2: o desafio do dia dá a mesma partida a todos e o servidor reproduz o resultado', () => {
+  assert.equal(E.sementeDoDia('2026-10-22'), E.sementeDoDia('2026-10-22'));
+  assert.notEqual(E.sementeDoDia('2026-10-22'), E.sementeDoDia('2026-10-23'));
+  const a = E.novoDesafio('2026-10-22').estados.get('eu'), b = E.novoDesafio('2026-10-22').estados.get('eu');
+  assert.deepEqual(a.agenda, b.agenda);
+  assert.deepEqual(a.baralho, b.baralho);
+  assert.equal(a.meta, b.meta);
+  // o primeiro dado de cada rodada é o mesmo, escolhendo rolar ou dado duplo
+  const rolar = E.novoDesafio('2026-10-22'), duplo = E.novoDesafio('2026-10-22');
+  E.passoDoDesafio(rolar, { t: 'rolar' });
+  E.passoDoDesafio(duplo, { t: 'dado_duplo' });
+  assert.equal(rolar.estados.get('eu').dado, duplo.estados.get('eu').pend.dados[0]);
+  const { st, acoes } = jogarDesafio('2026-10-22');
+  const volta = E.rodarDesafio('2026-10-22', acoes);
+  assert.deepEqual(volta.pontos, E.pontuacao(st));
+  assert.equal(volta.st.saldo, st.saldo);
+  const outra = jogarDesafio('2026-10-22', 'duplo');
+  assert.deepEqual(E.rodarDesafio('2026-10-22', outra.acoes).pontos, E.pontuacao(outra.st));
+});
+
+test('E2: o servidor recusa ações inválidas, partida incompleta e ações a mais', () => {
+  const { acoes } = jogarDesafio('2026-10-22');
+  assert.match(E.rodarDesafio('2026-10-22', acoes.slice(0, -3)).erro, /não terminou/);
+  assert.match(E.rodarDesafio('2026-10-22', [...acoes, { t: 'rolar' }]).erro, /depois do fim/);
+  assert.match(E.rodarDesafio('2026-10-22', [{ t: 'hackear' }]).erro, /inválida/);
+  assert.match(E.rodarDesafio('2026-10-22', [{ t: 'comprar', itens: ['lona'] }]).erro, /Ação 1/);
+  assert.match(E.rodarDesafio('2026-10-22', 'x').erro, /inválida/);
+  assert.match(E.rodarDesafio('2026-10-22', new Array(401).fill({ t: 'rolar' })).erro, /inválida/);
 });
