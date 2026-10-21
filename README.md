@@ -45,7 +45,8 @@ Testes:
 npm test                                                # regras do jogo e simulação de balanceamento
 npm run simular                                         # métricas do RFC com o motor atual (4000 partidas por medida)
 DATABASE_URL=postgres://... npm run test:integracao     # salas no PostgreSQL: guardião, leilão, votação, patrulhas, revanche, insígnias
-CONTAGEM_FILA_MS=1500 RODADA_MS=1500 npm start          # num terminal
+EMAIL_MODO=teste LIMITE_CONTA_X=50 INTERVALO_MS=800 CONTAGEM_FILA_MS=1500 RODADA_MS=1500 npm start   # num terminal
+npm run metricas                                        # métricas de uso do RFC, direto do banco
 node test/e2e.mjs                                       # em outro: salas, fila e rodadas sincronizadas
 ```
 
@@ -64,6 +65,17 @@ Todas valem no jogo sozinho e nas salas, exceto onde indicado. As regras ficam e
 - **Cartas de sala (A2, salas).** Quatro cartas valem para todos (Mutirão, Janta da patrulha, Chuva, Ventania); quem tirou ganha 5 BC. Quem acerta a pergunta de uma carta de sala de Tempestade fica de fora do revés. Pagamento recusado por carta de sala não tira a vez de quem não tirou a carta.
 - **Reações rápidas (A3, salas).** Seis reações fixas, sem alvo, uma a cada 3 s por jogador.
 - **Sensação de jogo (D0 a D3, D5).** Tabuleiro e peões ficam na tela e só os painéis são redesenhados; o peão anda casa a casa, o dado gira no centro, moedas voam para o saldo e o número conta. Sons curtos gerados no navegador (Web Audio, sem arquivo) e vibração curta no Android; o botão do topo liga e desliga, e a escolha fica no aparelho. Com "reduzir movimento" as animações viram troca direta.
+
+## Regras da Etapa 4 (trocas, missão e conta)
+
+- **Feira de Trocas (A7).** Casa nova do tabuleiro, no lugar de uma Agência (a casa sem pergunta, para não tirar cartas). O jogador troca um item do kit por outro e **nenhum BC muda de conta**. O baú da Feira troca na hora por um item que custa o mesmo ou menos. Nas salas também dá para oferecer a troca aos outros: quem aceitar primeiro (e tiver o item pedido e não tiver o oferecido) troca. Na sala de espera a oferta vale só na rodada; na sala com código vale na rodada e na seguinte. Sem itens no kit a casa não faz nada.
+- **Missão da sala (F6).** Uma por partida, igual para todos, sorteada pela semente (6 missões, como "Armar a barraca: Lona, Corda e Panela"). Quem monta o conjunto primeiro ganha +15 pts. Vale nas salas e no jogo sozinho (contra os rivais); não existe no desafio do dia.
+- **Leitura curta (F5).** Todas as 36 cartas têm um texto de até 15 palavras, já com a pergunta, para os Lobinhos lerem com o chefe ou um responsável. A escolha (completa ou curta) fica na entrada e é guardada no aparelho; em sala, cada jogador lê do seu jeito.
+- **Código de recuperação.** Seis palavras de uma lista de 256 (48 bits). Aparece uma vez, na tela de Minha trilha; no banco fica só o HMAC. Quem digitar as palavras na entrada recupera a conta, as insígnias e o histórico em outro aparelho (o aparelho antigo sai, porque cada jogador tem um só cookie). Gerar outro código invalida o anterior.
+- **E-mail do responsável e quadro de recordes.** Para aparecer no quadro, o responsável informa o e-mail e confirma com um código de 6 números, que vale 15 minutos e 5 tentativas (1 envio por minuto, no máximo 5 por e-mail por dia). O quadro mostra só apelido, ficha e pontos, nunca o e-mail. O responsável sai do quadro e apaga o e-mail quando quiser. **O envio fica desligado enquanto não houver `SMTP_URL`**: sem isso a API responde 503 e a tela avisa.
+- **Medição de uso.** O aparelho conta, sem identificar ninguém, quantas partidas do jogo sozinho começaram e terminaram (`contador_solo`). `npm run metricas` mostra as quatro métricas do RFC (partidas terminadas, nova partida em 10 min, retorno em 7 dias e duração da rodada na sala de espera).
+
+O banco ganhou `config`, `recuperacao`, `responsaveis`, `codigos_email`, `contador_solo` e `salas.missao` (migração 005). O estado do jogador passou para `v: 5`.
 
 ### Como o servidor e a tela falam
 
@@ -106,6 +118,12 @@ Para atualizar o jogo: `git pull && docker compose up -d --build`.
 | `CONTAGEM_FILA_MS` | `80000` | Contagem da sala de espera |
 | `RODADA_MS` | `45000` | Tempo de cada rodada na sala de espera |
 | `INATIVIDADE_MS` | `7200000` | Sala com código fecha depois de 2 h sem jogadas |
+| `INTERVALO_MS` | `10000` | Janela de votação do evento e do leilão entre rodadas |
+| `SMTP_URL` | — | Liga o envio do código ao e-mail do responsável (`smtps://usuario:senha@servidor`). Sem isso o recurso fica desligado |
+| `EMAIL_DE` | `Mercado da Trilha <nao-responda@mercado.local>` | Remetente do e-mail |
+| `SEGREDO_RECUPERACAO` | gerado e guardado no banco | Segredo do HMAC do código de recuperação. Defina em produção para ele não depender do banco |
+| `EMAIL_MODO` | — | `teste` (guarda o código na memória e abre `/api/_teste/codigo`) ou `log` (escreve o código no log). **Só para desenvolvimento e testes** |
+| `LIMITE_CONTA_X` | `1` | Multiplica os limites por minuto das rotas de conta; os testes de ponta a ponta usam 50 |
 
 ## Divulgação do Trilha HUB
 
@@ -129,11 +147,11 @@ As 12 fichas em `public/img/fichas/` são **provisórias**, desenhadas em SVG si
 
 `test/sim.js` joga partidas com o motor e `test/balanceamento.test.js` confere faixas-alvo no `npm test`. O jogador de referência é o do RFC: compra tudo o que cabe, usa o dado duplo com 25 BC ou mais quando falta item e acerta 80% das cartas (50% para os rivais da mesa de 4). Contra o motor antigo (commit 0fc650a) a simulação reproduz o diagnóstico do RFC: 5,8 rodadas sem escolha (RFC: 5,9), 36% de vitória de quem sabe as regras, 95 BC de saldo final.
 
-Cada etapa tem uma faixa mínima (`FAIXAS.etapa`) e o RFC define a meta de lançamento (`FAIXAS.lancamento`); `npm run simular` mostra as duas. Na Etapa 3 o jogo chega a 49% de vitória de quem sabe as regras (meta de lançamento: 44%, atingida), 0% de cartas repetidas em 3 partidas seguidas (meta: 15%, atingida), 0,2% de partidas sem comemoração (meta: 0%; a tela de resultado ainda comemora toda partida) e 16% de partidas com pagamento recusado (meta: 30% a 50%, ainda não). Os eventos de custo ajudaram (11% para 15%), mas não bastam: a recusa só sobe com mais pressão sobre o saldo (valor do dado duplo, pedágios ou o jogador de referência), uma decisão de design que o RFC não fecha.
+Cada etapa tem uma faixa mínima (`FAIXAS.etapa`) e o RFC define a meta de lançamento (`FAIXAS.lancamento`); `npm run simular` mostra as duas. Na Etapa 4 o jogo chega a 49% de vitória de quem sabe as regras (meta de lançamento: 44%, atingida), 0% de cartas repetidas em 3 partidas seguidas (meta: 15%, atingida), 0,2% de partidas sem comemoração (meta: 0%; a tela de resultado ainda comemora toda partida) e 18% de partidas com pagamento recusado (meta: 30% a 50%, ainda não). Os eventos de custo ajudaram (11% para 15%), mas não bastam: a recusa só sobe com mais pressão sobre o saldo (valor do dado duplo, pedágios ou o jogador de referência), uma decisão de design que o RFC não fecha.
 
 ## Próximos passos
 
 - Trocar as fichas provisórias pelas artes finais.
 - Confirmar o destino de `TRILHAHUB_URL`.
 - Quadro de recordes, com e-mail do responsável confirmado por código (está desenhado no plano, ainda não foi implementado).
-- Etapa 4 do RFC: troca de itens (A7), texto curto das cartas para Lobinhos (F5), missão da sala (F6), quadro de recordes com e-mail do responsável confirmado por código, código de recuperação de 6 palavras e a medição de uso (incluindo um contador anônimo do jogo sozinho). Depois, a Etapa 5: fichas finais, revisão das 36 cartas contra a carteira real, teste com uma tropa e ajuste do balanceamento.
+- Etapa 5 do RFC: fichas finais, revisão das 36 cartas contra a carteira real, teste com uma tropa e ajuste do balanceamento. A lista completa de pendências está em `todo.md`.

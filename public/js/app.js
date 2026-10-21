@@ -64,6 +64,7 @@ const S = {
   som: ls.get('mt-som', true), reacaoLivreEm: 0,
   insignias: Object.keys(ls.get('mt-insignias', {})),   // todas as que o jogador já ganhou (aparelho + servidor)
   resultado: null, trilha: null, ranking: null, soloSala: false,
+  troca: {}, missaoSolo: null, leitura: ls.get('mt-leitura', 'completa'),   // leitura: 'completa' ou 'curta' (Lobinhos)
   setas: {}, delta: {},  // C5: quem subiu ou desceu no placar e os pontos ganhos na última jogada
 };
 
@@ -148,6 +149,7 @@ async function iniciar() {
       mesclarInsignias(r.insignias || []);
     }
     enviarPendentes();
+    enviarContador();
     carregarRanking();
     const sala = ls.get('mt-sala', null);
     if (sala && S.registrado) { S.modo = 'sala'; S.tela = 'jogo'; S.cenasN = null; await conectar(); enviar({ t: 'entrar', codigo: sala }); }
@@ -249,6 +251,7 @@ async function aplicar(m, animar) {
   }
   const antes = S.eu;
   atualizarRanking(m.placar);
+  S.missaoSolo = m.missao || null;
   S.sala = m.sala; S.eu = m.eu; S.placar = m.placar; S.mural = m.mural; S.pontes = m.pontes || {};
   if (m.sala) S.offset = m.sala.agora - Date.now();
   if (m.eu && antes && antes.pend?.tipo === 'loja' && !m.eu.pend) S.carrinho = {};
@@ -514,6 +517,17 @@ const CENAS = {
     banner(`${E.EVENTOS[ev.tipo].nome}!${loja}`, 'evento'); som('moeda');
     await sleep(350);
   },
+  async troca(ev, ordem, meu) {
+    flutuar(peao(ordem), `${E.ITENS.find((i) => i.id === ev.dar).nome} → ${E.ITENS.find((i) => i.id === ev.querer).nome}`, 'info');
+    if (meu) som('moeda');
+  },
+  async oferta(ev, ordem, meu) {
+    if (meu) toast('Oferta feita: quem aceitar primeiro troca com você.');
+  },
+  async missao(ev, ordem, meu, m) {
+    if (meu) { confete(); som('fogo'); banner(`Missão cumprida primeiro: ${ev.nome}! +${E.MISSAO_PTS} pts`, 'virada'); }
+    else toast(`${m.placar.find((p) => p.ordem === ordem)?.apelido || 'Alguém'} cumpriu a missão da sala primeiro.`);
+  },
   async anuncio(ev, ordem, meu) {
     if (meu) toast(`Na próxima rodada: ${E.descreverEvento(ev)}`);
   },
@@ -570,7 +584,7 @@ async function enviarPendentes() {
     ls.set('mt-envios', resto);
   } catch { /* sem apelido ou sem rede: fica na fila */ } finally { enviando = false; }
 }
-addEventListener('online', () => { S.online = true; enviarPendentes(); });
+addEventListener('online', () => { S.online = true; enviarPendentes(); enviarContador(); });
 
 async function carregarRanking() {
   if (!S.online) return;
@@ -594,12 +608,13 @@ function coletarCenas(ctx) {
 
 function salvarSolo() {
   const { modo, uuid: id, dia, acoes, treino, ctx } = S.solo;
-  ls.set('mt-solo', { v: E.VERSAO_ESTADO, modo, uuid: id, dia, acoes, treino, pontes: ctx.pontes, estados: Object.fromEntries(ctx.estados) });
+  ls.set('mt-solo', { v: E.VERSAO_ESTADO, modo, uuid: id, dia, acoes, treino, pontes: ctx.pontes, missao: ctx.missao, estados: Object.fromEntries(ctx.estados) });
 }
 function carregarSolo() {
   const d = ls.get('mt-solo', null);
   if (!d || d.v !== E.VERSAO_ESTADO || !d.estados?.eu) { ls.del('mt-solo'); return null; }
   const ctx = E.novoContexto(d.modo === 'solo' ? d.pontes || {} : null);
+  if (d.modo === 'solo') ctx.missao = d.missao || E.missaoDaPartida(d.estados.eu.seed);
   for (const [id, st] of Object.entries(d.estados)) { st.saida = []; st.cena = []; ctx.estados.set(id, st); }
   return { modo: d.modo, uuid: d.uuid, dia: d.dia, acoes: d.acoes || [], treino: !!d.treino, ctx };
 }
@@ -613,7 +628,8 @@ function publicarSolo(cenas = []) {
   const placar = [...ctx.estados].map(([id, s]) => ({ ...E.resumoPublico(s), cor: corDe(id), ordem: ORDEM[id], eu: id === 'eu', patrulha: null, insignias: [] })).sort(E.compararPlacar);
   const pontes = {};
   for (const [pos, id] of Object.entries(ctx.pontes || {})) pontes[pos] = ORDEM[id];
-  empilhar({ t: 'estado', sala: null, eu: snap, placar, mural: [], pontes, cenas });
+  const mi = ctx.missao ? { desc: E.descreverMissao(ctx.missao), pts: E.MISSAO_PTS, vencedor: ctx.missao.vencedor != null ? ctx.estados.get(ctx.missao.vencedor)?.apelido || null : null } : null;
+  empilhar({ t: 'estado', sala: null, eu: snap, placar, mural: [], pontes, cenas, missao: mi });
 }
 
 function acao(t, extra = {}) {
@@ -666,6 +682,7 @@ function finalizarSolo() {
   if (modo === 'solo') fila.push({ tipo: 'solo', corpo: { id, pontos: pts, saldo: st.saldo, acertos: st.acertos, kit: st.kit.length, rodadas: st.rodadas, posicao: pos, insignias: novas } });
   else if (!treino) { ls.set(`mt-desafio-${dia}`, { pontos: pts }); fila.push({ tipo: 'desafio', corpo: { dia, acoes } }); }
   ls.set('mt-envios', fila);
+  contar('fim');
   enviarPendentes().then(() => { if (modo === 'desafio') carregarRanking(); });
 }
 
@@ -675,6 +692,7 @@ async function jogarSozinho(continuar, modo = 'solo') {
   let salvo = continuar ? carregarSolo() : null;
   if (continuar && !salvo) toast('O jogo foi atualizado: a partida salva foi descartada.');
   if (!salvo) {
+    contar('inicio');
     const apelido = S.perfil.apelido.trim(), ficha = S.perfil.ficha;
     if (modo === 'desafio') {
       const dia = diaSP();
@@ -793,6 +811,7 @@ function telaEntrada() {
     ['pedagio', 'De 2 a 12 BC para o caixa do evento. Em sala, quem para primeiro vira guardião da ponte e ganha 3 BC por pedágio pago ali.'], ['bussola', 'Carta de sorte com uma pergunta.'],
     ['tempestade', 'Carta de revés com uma pergunta.'], ['perdido', 'Pague 10 BC ou arrisque o dado: de 4 a 6 acha a trilha de graça.'],
     ['fogo', 'Mais 20 BC e uma fogueira na tela.'],
+    ['troca', 'Troque um item do kit por outro. Nenhum BC muda de conta.'],
   ];
   return `
   <section class="hero"><div class="wrap">
@@ -808,6 +827,7 @@ function telaEntrada() {
         <div class="fichas" role="radiogroup" aria-label="Fichas">${E.FICHAS.map((f) => `<button type="button" class="ficha-op" role="radio" aria-checked="${p.ficha === f.id}" data-ficha="${f.id}" title="${esc(f.nome)}"><img src="${fichaSrc(f.id)}" alt="${esc(f.nome)}"></button>`).join('')}</div>
         <span class="note" id="fichaNome">${esc(fichaNome(p.ficha))}</span>
       </div>
+      <label class="f" style="max-width:340px">Leitura das cartas<select id="leitura"><option value="completa" ${S.leitura === 'completa' ? 'selected' : ''}>Completa (Escoteiros em diante)</option><option value="curta" ${S.leitura === 'curta' ? 'selected' : ''}>Curta (Lobinhos, com o chefe ou um responsável)</option></select></label>
       <label class="f" style="max-width:340px">Duração (jogo sozinho e sala com código)<select id="rodadas">${E.RODADAS_OPCOES.map((n) => `<option value="${n}" ${n === S.rodadas ? 'selected' : ''}>${n} rodadas${n === E.RODADAS_PADRAO ? ' (padrão)' : ''}</option>`).join('')}</select></label>
     </div>
     <div class="modos">
@@ -825,7 +845,8 @@ function telaEntrada() {
     </div>
     ${S.online ? '' : '<p class="note">Sem conexão com o servidor: as salas ficam indisponíveis, mas você pode jogar sozinho.</p>'}
     ${rec ? `<p class="note">Seu recorde jogando sozinho: <b>${rec.pontos} pts</b>.</p>` : ''}
-    <div class="row minhas"><b>Minhas insígnias</b> ${S.insignias.length ? S.insignias.slice(0, 12).map((i) => seloHtml(i)).join('') : '<span class="note">Nenhuma ainda: jogue uma partida até o fim.</span>'}<button class="btn sm" id="trilha">Minha trilha</button></div>
+    <div class="row minhas"><b>Minhas insígnias</b> ${S.insignias.length ? S.insignias.slice(0, 12).map((i) => seloHtml(i)).join('') : '<span class="note">Nenhuma ainda: jogue uma partida até o fim.</span>'}<button class="btn sm" id="trilha">Minha trilha</button><button class="btn sm" id="recordes" ${S.online ? '' : 'disabled'}>Quadro de recordes</button></div>
+    <details><summary>Recuperar minha conta com o código de 6 palavras</summary><div class="form-linha" style="margin-top:8px"><label class="f">As 6 palavras<input id="palavrasRec" type="text" autocomplete="off" placeholder="onca lobo coruja raposa tucano arara" ${S.online ? '' : 'disabled'}></label><button class="btn" id="recuperar" ${S.online ? '' : 'disabled'}>Recuperar</button></div></details>
     <details><summary>Como funciona cada casa</summary>
       <div class="casas">${casas.map(([k, t]) => `<div class="casa-info" style="--t:var(--c-${k})">${ic(k)}<b>${E.CASAS[k].nome}</b><span>${t}</span></div>`).join('')}</div>
       <p class="note" style="margin-top:10px">Pontos: 10 por item do kit, +20 pelo kit completo, +10 por carta acertada, 1 pt a cada 10 BC que sobrarem, o bônus da meta secreta e o Canivete do leilão. A cada 3 rodadas há um evento, anunciado antes; cada item do kit protege de um revés, e nas últimas rodadas créditos e cartas certas valem em dobro. Antes de rolar, você escolhe: rolar de graça, pagar 5 BC pelo dado duplo ou ajudar no acampamento e ganhar 15 BC. Acertar uma carta de Tempestade evita o revés. Desempate: saldo final, depois cartas acertadas.</p>
@@ -842,10 +863,14 @@ function ligarEntrada() {
     $('#fichaNome').textContent = fichaNome(S.perfil.ficha);
   }));
   $('#rodadas').addEventListener('change', (e) => { S.rodadas = Number(e.target.value); });
+  $('#leitura').addEventListener('change', (e) => { S.leitura = e.target.value; ls.set('mt-leitura', S.leitura); });
   $('#solo').addEventListener('click', () => jogarSozinho(false));
   $('#continuar')?.addEventListener('click', (e) => jogarSozinho(true, e.currentTarget.dataset.modo));
   $('#desafio').addEventListener('click', jogarDesafio);
   $('#trilha').addEventListener('click', abrirTrilha);
+  $('#recordes').addEventListener('click', abrirRecordes);
+  $('#recuperar').addEventListener('click', () => recuperarConta($('#palavrasRec').value));
+  $('#palavrasRec').addEventListener('keydown', (e) => { if (e.key === 'Enter') recuperarConta(e.target.value); });
   $('#entrarCod').addEventListener('click', () => entrarComCodigo($('#codigo').value));
   $('#codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrarComCodigo(e.target.value); });
   $('#criar').addEventListener('click', criarSala);
@@ -855,10 +880,11 @@ function ligarEntrada() {
 // ---------- Minha trilha (E3) ----------
 const MODOS = { solo: 'Sozinho', desafio: 'Desafio do dia', espera: 'Sala de espera', codigo: 'Sala com código' };
 async function abrirTrilha() {
-  S.trilha = null; ir('trilha');
+  S.trilha = null; S.conta = { resp: null, emailEnviado: null }; ir('trilha');
   try {
     S.trilha = await api('/api/minha-trilha');
     mesclarInsignias(S.trilha.insignias.map((i) => i.id));
+    S.conta.resp = await api('/api/responsavel').catch(() => null);
   } catch {
     // sem rede ou sem apelido no servidor: mostra o que está guardado no aparelho
     S.trilha = { offline: true, partidas: ls.get('mt-historico', []),
@@ -873,11 +899,94 @@ function telaTrilha() {
     <div class="box"><div class="eyebrow">Insígnias · ${E.INSIGNIAS.filter((i) => ganhas.has(i.id)).length} de ${E.INSIGNIAS.length}</div>
       <div class="insignias">${E.INSIGNIAS.map((i) => `<div class="insignia${ganhas.has(i.id) ? '' : ' off'}">${seloHtml(i.id, !ganhas.has(i.id))}<div><b>${esc(i.nome)}</b><span class="note">${esc(i.desc)}</span></div></div>`).join('')}</div></div>
     <div class="box"><div class="eyebrow">Últimas partidas</div>${t.partidas.length ? `<table class="extrato">${t.partidas.map((p) => `<tr><td>${MODOS[p.modo] || p.modo}</td><td class="v">${p.pontos} pts</td><td class="v muted">${p.saldo} BC</td><td class="v muted">${new Date(p.quando).toLocaleDateString('pt-BR')}</td></tr>`).join('')}</table>` : '<p class="note">Nenhuma partida terminada ainda.</p>'}
-      ${t.offline ? '<p class="note">Sem conexão: mostrando só o que está neste aparelho.</p>' : ''}</div>`;
+      ${t.offline ? '<p class="note">Sem conexão: mostrando só o que está neste aparelho.</p>' : ''}</div>
+    ${t.offline ? '<div class="box"><div class="eyebrow">Conta</div><p class="note">O código de recuperação e o quadro de recordes precisam de conexão e de um apelido salvo no servidor.</p></div>' : contaHtml()}`;
   return `${topo(`<span class="chip">Minha trilha</span><span class="sp"></span>${botaoSom()}<button class="btn sm" id="voltarTrilha">Voltar</button>`)}
   <div class="wrap trilha stack">${corpo}</div>`;
 }
-function ligarTrilha() { $('#voltarTrilha')?.addEventListener('click', () => { S.trilha = null; ir('entrada'); }); }
+// ---------- Conta: código de recuperação, e-mail do responsável e quadro de recordes ----------
+function contaHtml() {
+  const r = S.conta?.resp, c = S.conta || {};
+  let quadro;
+  if (!r) quadro = '<p class="muted">Carregando…</p>';
+  else if (r.confirmado) quadro = `<p>Você aparece no quadro de recordes. E-mail do responsável: <b>${esc(r.email)}</b>.</p><div class="row"><button class="btn sm danger" id="sairQuadro">Sair do quadro e apagar o e-mail</button></div>`;
+  else if (!r.disponivel) quadro = '<p class="note">O envio de e-mail ainda não está ligado neste servidor, então o quadro de recordes está fechado.</p>';
+  else if (c.emailEnviado) quadro = `<p>Mandamos um código de 6 números para <b>${esc(c.emailEnviado)}</b>. Peça ao responsável para ler o e-mail e digite aqui.</p>
+    <div class="form-linha"><label class="f">Código do e-mail<input id="codigoEmail" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></label><button class="btn primary" id="confirmarEmail">Confirmar</button></div>`;
+  else quadro = `<p class="note">Para aparecer no quadro, um responsável precisa autorizar: informe o e-mail dele e confirme com o código que ele receber.</p>
+    <div class="form-linha"><label class="f">E-mail do responsável<input id="emailResp" type="email" maxlength="120" autocomplete="email" placeholder="responsavel@exemplo.com.br"></label><button class="btn primary" id="enviarEmail">Enviar código</button></div>`;
+  return `<div class="box"><div class="eyebrow">Código de recuperação</div>
+      <p class="note">Se limpar o navegador, você perde as insígnias e o histórico. Com um código de 6 palavras você recupera tudo em qualquer aparelho.</p>
+      ${S.codigoNovo ? `<div class="palavras">${S.codigoNovo.map((x) => `<span>${x}</span>`).join('')}</div><p class="note">Anote ou imprima agora: ele aparece só desta vez. Gerar outro código invalida este. Quem tiver estas palavras entra na sua conta.</p><div class="row"><button class="btn sm" id="copiarCodigo">Copiar</button></div>` : '<div class="row"><button class="btn" id="gerarCodigo">Gerar o meu código</button></div>'}</div>
+    <div class="box"><div class="eyebrow">Quadro de recordes</div>${quadro}
+      <p class="note">O quadro mostra só apelido, ficha e pontos. O e-mail do responsável serve só para confirmar a autorização e pode ser apagado a qualquer hora.</p></div>`;
+}
+async function acaoConta(fn, ok) {
+  try { await fn(); if (ok) toast(ok); } catch (e) { toast(e.message); }
+  render();
+}
+function ligarTrilha() {
+  $('#voltarTrilha')?.addEventListener('click', () => { S.trilha = null; S.codigoNovo = null; ir('entrada'); });
+  $('#gerarCodigo')?.addEventListener('click', () => acaoConta(async () => { S.codigoNovo = (await api('/api/recuperacao', {})).palavras; }));
+  $('#copiarCodigo')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(S.codigoNovo.join(' ')); toast('Código copiado.'); } catch { toast('Copie as palavras à mão.'); } });
+  $('#enviarEmail')?.addEventListener('click', () => acaoConta(async () => {
+    S.conta.emailEnviado = (await api('/api/responsavel', { email: $('#emailResp').value })).email;
+  }, 'Código enviado. Veja a caixa de entrada do responsável.'));
+  $('#confirmarEmail')?.addEventListener('click', () => acaoConta(async () => {
+    await api('/api/responsavel/confirmar', { codigo: $('#codigoEmail').value });
+    S.conta.resp = await api('/api/responsavel'); S.conta.emailEnviado = null;
+  }, 'Pronto: você entrou no quadro de recordes.'));
+  $('#sairQuadro')?.addEventListener('click', () => acaoConta(async () => {
+    const r = await fetch('/api/responsavel', { method: 'DELETE' });
+    if (!r.ok) throw new Error('Não foi possível sair do quadro agora.');
+    S.conta.resp = await api('/api/responsavel');
+  }, 'Você saiu do quadro e o e-mail foi apagado.'));
+}
+
+// ---------- Quadro de recordes (só quem tem o e-mail do responsável confirmado) ----------
+async function abrirRecordes() {
+  S.quadro = null; ir('recordes');
+  try { S.quadro = await api('/api/recordes'); } catch { S.quadro = { erro: true }; }
+  render();
+}
+function telaRecordes() {
+  const q = S.quadro;
+  const lista = (k) => (q[k]?.length ? `<ol>${q[k].map((x) => `<li><img src="${fichaSrc(x.ficha)}" alt=""><span>${esc(x.apelido)}</span><b>${x.pontos} pts</b></li>`).join('')}</ol>` : '<p class="note">Ninguém ainda.</p>');
+  const corpo = !q ? '<p class="muted">Carregando…</p>' : q.erro ? '<p class="note">Não foi possível carregar o quadro agora.</p>'
+    : `<div class="quadro">${Object.entries(MODOS).map(([k, nome]) => `<div class="box"><div class="eyebrow">${nome}</div>${lista(k)}</div>`).join('')}</div>
+      <p class="note">Aparecem só jogadores cujo responsável confirmou o e-mail. Para entrar, abra Minha trilha.</p>`;
+  return `${topo(`<span class="chip">Quadro de recordes</span><span class="sp"></span>${botaoSom()}<button class="btn sm" id="voltarRecordes">Voltar</button>`)}
+  <div class="wrap trilha stack">${corpo}</div>`;
+}
+function ligarRecordes() { $('#voltarRecordes')?.addEventListener('click', () => { S.quadro = null; ir('entrada'); }); }
+
+// ---------- Recuperar a conta com o código de 6 palavras ----------
+async function recuperarConta(texto) {
+  try {
+    const r = await api('/api/recuperar', { palavras: texto });
+    S.online = true; S.registrado = true; S.perfil = { ...S.perfil, ...r.jogador };
+    ls.set('mt-perfil', S.perfil); mesclarInsignias(r.insignias || []);
+    toast(`Conta recuperada: bem-vindo de volta, ${r.jogador.apelido}!`);
+  } catch (e) { toast(e.message); }
+  render();
+}
+
+// ---------- Contador anônimo do jogo sozinho (só quantas partidas começaram e terminaram) ----------
+function contar(evento) {
+  const c = ls.get('mt-contador', { inicio: 0, fim: 0 });
+  c[evento] = (c[evento] || 0) + 1; ls.set('mt-contador', c);
+  enviarContador();
+}
+async function enviarContador() {
+  const c = ls.get('mt-contador', { inicio: 0, fim: 0 });
+  if (!S.online || (!c.inicio && !c.fim)) return;
+  const env = { inicio: Math.min(c.inicio || 0, 50), fim: Math.min(c.fim || 0, 50) };
+  try {
+    const r = await fetch('/api/contador', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env) });
+    if (r.ok) ls.set('mt-contador', { inicio: c.inicio - env.inicio, fim: c.fim - env.fim });
+  } catch { /* fica para a próxima vez */ }
+}
+
 
 function telaFila() {
   const f = S.fila, js = f?.jogadores || [], max = f?.max || 8;
@@ -965,7 +1074,7 @@ function painel(st) {
     return `<div class="painel" style="--t:var(--sun)"><div class="tag">Fim do mercado</div><h3>Você completou as ${st.rodadas} rodadas</h3><p>${E.pontuacao(st).total} pts.</p><button class="btn primary" id="verRes">Ver resultado</button></div>`;
   }
   if (st.pend) {
-    const k = st.pend.tipo === 'loja' ? st.pend.loja : st.pend.tipo === 'carta' ? E.cartaPorId(st.pend.carta).tipo : st.pend.tipo === 'dado' ? 'partida' : st.pend.tipo;
+    const k = st.pend.tipo === 'loja' ? st.pend.loja : st.pend.tipo === 'carta' ? E.cartaPorId(st.pend.carta).tipo : st.pend.tipo === 'dado' ? 'partida' : st.pend.tipo;  // troca, pedagio e perdido são o nome da casa
     let corpo = '', titulo = '';
     if (st.pend.tipo === 'dado') {
       const [a, b] = st.pend.dados;
@@ -989,10 +1098,24 @@ function painel(st) {
     } else if (st.pend.tipo === 'carta') {
       const c = E.cartaMostrada(st, st.pend.carta);
       titulo = E.CASAS[c.tipo].nome;
-      corpo = `<div class="carta" style="--t:var(--c-${c.tipo})"><span class="tag">Carta ${E.CASAS[c.tipo].nome}${c.sala ? ' · vale para a sala toda' : ''}</span><strong>${esc(c.titulo)}</strong><span>${esc(c.historia)}</span></div>
-        <p><b>${esc(c.pergunta)}</b></p>
+      const curta = S.leitura === 'curta' && c.curto;
+      corpo = `<div class="carta" style="--t:var(--c-${c.tipo})"><span class="tag">Carta ${E.CASAS[c.tipo].nome}${c.sala ? ' · vale para a sala toda' : ''}</span><strong>${esc(c.titulo)}</strong>${curta ? `<span><b>${esc(c.curto)}</b></span>` : `<span>${esc(c.historia)}</span>`}</div>
+        ${curta ? '' : `<p><b>${esc(c.pergunta)}</b></p>`}
         ${c.tipo === 'tempestade' ? '<p class="note">Acertar a pergunta evita o revés.</p>' : ''}
         <div class="opcoes">${c.opcoes.map((o, i) => `<button class="opcao" data-resp="${i}" ${trava}>${esc(o)}</button>`).join('')}</div>`;
+    } else if (st.pend.tipo === 'troca') {
+      titulo = E.CASAS.troca.nome;
+      const faltam = E.ITENS.filter((i) => !st.kit.includes(i.id));
+      const dar = st.kit.includes(S.troca.dar) ? S.troca.dar : st.kit[0], querer = faltam.some((i) => i.id === S.troca.querer) ? S.troca.querer : faltam[0]?.id;
+      S.troca = { dar, querer };
+      const nome = (id) => E.ITENS.find((i) => i.id === id)?.nome;
+      const bau = dar && querer && E.ITENS.find((i) => i.id === querer).preco <= E.ITENS.find((i) => i.id === dar).preco;
+      const sala = S.modo === 'sala';
+      corpo = `<p>Troque um item do seu kit por outro. <b>Nenhum BC muda de conta.</b></p>
+        ${faltam.length ? `<div class="troca-sel"><label class="f">Eu dou<select id="trocaDar">${st.kit.map((id) => `<option value="${id}" ${id === dar ? 'selected' : ''}>${nome(id)}</option>`).join('')}</select></label>
+        <label class="f">Eu quero<select id="trocaQuero">${faltam.map((i) => `<option value="${i.id}" ${i.id === querer ? 'selected' : ''}>${i.nome}</option>`).join('')}</select></label></div>` : '<div class="okmsg">Você já tem todos os itens do kit!</div>'}
+        <div class="row"><button class="btn primary" id="trocarBau" ${bau && !S.aguardando ? '' : 'disabled'}>Trocar no baú</button>${sala ? `<button class="btn" id="oferecer" ${faltam.length && !S.aguardando ? '' : 'disabled'}>Oferecer à sala</button>` : ''}<button class="btn" id="sairTroca" ${trava}>Sair sem trocar</button></div>
+        <p class="note">Baú: na hora, só por um item que custa o mesmo ou menos${faltam.length && !bau ? ' (este custa mais)' : ''}.${sala ? ' Oferta: quem aceitar primeiro troca com você.' : ''}</p>`;
     } else if (st.pend.tipo === 'pedagio') {
       titulo = E.CASAS.pedagio.nome;
       const g = st.pend.guardiaoApelido;
@@ -1084,7 +1207,7 @@ function montarJogo() {
   return `<div id="topo-jogo"></div>
   <div class="wrap jogo">
     <div class="j-main">
-      <div class="boardbox">${montarTabuleiro()}${sala ? reacoesHtml() : ''}</div>
+      <div class="boardbox">${montarTabuleiro()}<div id="missao"></div>${sala ? reacoesHtml() : ''}</div>
       <div class="side"><div id="painel"></div><div id="conta-box"></div></div>
     </div>
     ${sala ? `<div class="dois"><div class="stack"><div class="eyebrow">Placar da sala</div><div id="placar"></div><div id="patrulhas"></div><div id="anfitriao"></div></div>
@@ -1116,10 +1239,23 @@ function painelJanela() {
   return { html, exclusivo: s.tipo === 'espera' };
 }
 
+// A7: ofertas de troca dos outros jogadores da sala.
+function painelOfertas() {
+  const of = S.sala?.ofertas, st = eu();
+  if (!of?.length || !st || st.fim) return '';
+  const nome = (id) => E.ITENS.find((i) => i.id === id)?.nome;
+  return `<div class="painel" style="--t:var(--c-troca)"><div class="tag">Feira de Trocas · ofertas</div><div class="ofertas">${of.map((o) => `<div class="oferta"><span><b>${esc(o.apelido)}</b> dá ${nome(o.dar)} e quer ${nome(o.querer)}</span>${o.possoAceitar ? `<button class="btn sm primary" data-aceitar="${o.de}">Aceitar</button>` : `<span class="note">Você precisa ter ${nome(o.querer)} e não ter ${nome(o.dar)}.</span>`}</div>`).join('')}</div></div>`;
+}
+function missaoHtml() {
+  const m = S.sala?.missao || S.missaoSolo;
+  if (!m) return '';
+  return `<div class="missao${m.vencedor ? ' feita' : ''}"><span class="eyebrow">Missão da sala</span><span><b>${esc(m.desc)}</b>. O primeiro a cumprir ganha +${m.pts} pts.</span>${m.vencedor ? `<span>Cumprida por <b>${esc(m.vencedor)}</b>.</span>` : '<span class="note">Ninguém cumpriu ainda.</span>'}</div>`;
+}
+
 function atualizarPainel() {
   const st = eu(); const el = $('#painel'); if (!st || !el) return;
   const j = painelJanela();
-  el.innerHTML = j.html + (j.exclusivo ? '' : painel(st)); ligarPainel(); tique();
+  el.innerHTML = j.html + (j.exclusivo ? '' : painelOfertas() + painel(st)); ligarPainel(); tique();
 }
 function atualizarMural() { const el = $('#mural'); if (el) el.innerHTML = muralHtml(); }
 
@@ -1136,6 +1272,7 @@ function atualizarJogo() {
   if (S.modo === 'sala') {
     atualizarPlacar(); $('#patrulhas').innerHTML = patrulhasHtml(); $('#anfitriao').innerHTML = anfitriao(); atualizarMural(); ligarAnfitriao();
   } else atualizarPlacar();
+  $('#missao').innerHTML = missaoHtml();
   atualizarCasas(st); atualizarCentro(st); atualizarPontes();
   if (nova || !S.cenaEmCurso) sincronizarPeoes(S.placar);
   tique();
@@ -1171,6 +1308,12 @@ function ligarPainel() {
   app.querySelectorAll('[data-resp]').forEach((b) => b.addEventListener('click', () => acao('responder', { i: Number(b.dataset.resp) })));
   $('#pagar')?.addEventListener('click', () => acao('pagar'));
   $('#arriscar')?.addEventListener('click', () => acao('arriscar'));
+  $('#trocaDar')?.addEventListener('change', (e) => { S.troca.dar = e.target.value; atualizarPainel(); });
+  $('#trocaQuero')?.addEventListener('change', (e) => { S.troca.querer = e.target.value; atualizarPainel(); });
+  $('#trocarBau')?.addEventListener('click', () => acao('trocar_bau', { dar: S.troca.dar, querer: S.troca.querer }));
+  $('#oferecer')?.addEventListener('click', () => acao('oferecer_troca', { dar: S.troca.dar, querer: S.troca.querer }));
+  $('#sairTroca')?.addEventListener('click', () => acao('sair_troca'));
+  app.querySelectorAll('[data-aceitar]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'aceitar_troca', de: Number(b.dataset.aceitar) })));
   app.querySelectorAll('[data-voto]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'votar_evento', i: Number(b.dataset.voto) })));
   app.querySelectorAll('[data-lance]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'dar_lance', valor: Number(b.dataset.lance) })));
 }
@@ -1270,6 +1413,7 @@ function render() {
   if (S.tela === 'entrada') { app.innerHTML = telaEntrada(); ligarEntrada(); }
   else if (S.tela === 'fila') { app.innerHTML = telaFila(); ligarFila(); }
   else if (S.tela === 'trilha') { app.innerHTML = telaTrilha(); ligarTrilha(); }
+  else if (S.tela === 'recordes') { app.innerHTML = telaRecordes(); ligarRecordes(); }
   else if (S.tela === 'jogo') {
     const vazio = telaJogo();
     if (vazio) { app.innerHTML = vazio; $('#sair')?.addEventListener('click', sairDoJogo); }

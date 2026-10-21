@@ -4,7 +4,7 @@
   --hero: #21412B; --on-hero: #F1F5EA; --hero-muted: #B9CBB7;
   --sun: #E3A21A; --on-sun: #1D2620; --accent: #2F6B3E; --good: #2F7A42; --bad: #B83A4B; --coin: #C98A0B;
   --c-partida: #D69712; --c-agencia: #178A86; --c-util: #2F7A42; --c-exp: #7A8B23; --c-enf: #C2415D;
-  --c-pedagio: #94612F; --c-bussola: #2B6FA3; --c-tempestade: #5D4E9A; --c-perdido: #4B5A50; --c-fogo: #D2541B;
+  --c-pedagio: #94612F; --c-bussola: #2B6FA3; --c-tempestade: #5D4E9A; --c-perdido: #4B5A50; --c-fogo: #D2541B; --c-troca: #A63D8F;
   --display: "Rockwell", "Roboto Slab", "Zilla Slab", Georgia, serif;
   --body: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -16,7 +16,7 @@
     --hero: #0C1710; --on-hero: #EEF3E7; --hero-muted: #9DB39B;
     --sun: #F0B43A; --accent: #6CC283; --good: #6CC283; --bad: #F07A8A; --coin: #F0B43A;
     --c-partida: #E8AA2C; --c-agencia: #33B3AD; --c-util: #53A866; --c-exp: #A5B83F; --c-enf: #E2627D;
-    --c-pedagio: #C08550; --c-bussola: #58A0D6; --c-tempestade: #8F80D0; --c-perdido: #7F9285; --c-fogo: #F07A3A;
+    --c-pedagio: #C08550; --c-bussola: #58A0D6; --c-tempestade: #8F80D0; --c-perdido: #7F9285; --c-fogo: #F07A3A; --c-troca: #D675C0;
     color-scheme: dark;
   }
 }
@@ -280,3 +280,19 @@ details summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
 .trilha { padding-block: 20px 40px; max-width: 760px; }
 .mestre { display: grid; gap: 6px; border-top: 1px dashed var(--line); padding-top: 8px; }
 .patr-l, .pl .pos + b { font-weight: 700; }
+
+/* Etapa 4: Feira de Trocas, missão da sala, conta e quadro de recordes */
+.troca-sel { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ofertas { display: grid; gap: 8px; }
+.oferta { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.missao { display: grid; gap: 2px; border: 1px dashed var(--c-troca); border-radius: 12px; padding: 8px 12px; background: color-mix(in srgb, var(--c-troca) 8%, var(--panel)); font-size: .92rem; }
+.missao.feita { opacity: .75; border-style: solid; }
+.palavras { display: flex; flex-wrap: wrap; gap: 8px; font-family: var(--mono); font-size: 1.15rem; font-weight: 700; }
+.palavras span { border: 2px solid var(--accent); border-radius: 10px; padding: 4px 10px; background: var(--panel2); }
+.form-linha { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.form-linha label { flex: 1; min-width: 200px; }
+.quadro { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.quadro ol { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; }
+.quadro li { display: flex; gap: 8px; align-items: center; }
+.quadro li img { width: 28px; height: 28px; border-radius: 50%; }
+.quadro li b { margin-left: auto; font-variant-numeric: tabular-nums; }
