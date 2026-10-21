@@ -13,10 +13,15 @@ export const DADO_DUPLO_CUSTO = 5;
 export const AJUDA_GANHO = 15;
 export const GRATIFICACAO = 3;
 export const PTS_CARTA = 10;
-export const VERSAO_ESTADO = 2;
+export const VERSAO_ESTADO = 3;
+export const NOITE_RODADAS = 3;        // C4: nas últimas 3 rodadas créditos e acertos valem em dobro
+export const DESCONTO_FEIRA = 5;
+export const LANCES = [0, 10, 20, 30, 40];
+export const CANIVETE_PTS = 15;
+export const VOTO_S = 10;              // A5 e C3: janela de 10 s entre duas rodadas
 export const REACOES = ['Boa!', 'Uau', 'Ai!', 'Valeu', 'Bora', 'Fogo!'];
 export const REACAO_INTERVALO_MS = 3000;
-export const TEMPO_RODADA_S = 45;
+export const TEMPO_RODADA_S = 20;   // C6: 20 s para jogar, mais 20 s se cair numa loja ou carta
 export const RODADAS_OPCOES = [8, 12, 16];
 export const RODADAS_PADRAO = 12;
 
@@ -79,20 +84,20 @@ export const CARTAS = [
   { id: 'contador', tipo: 'bussola', titulo: 'Contador esperto',
     historia: 'O Banco premia quem sabe onde conferir cada movimentação.',
     pergunta: 'Onde você confere cada entrada e saída da sua conta?',
-    opcoes: ['No extrato', 'Só no placar', 'Em lugar nenhum'],
+    opcoes: ['No extrato', 'No aviso de gasto, que some depois de 24 horas', 'Só o chefe do evento vê'],
     certa: 0, porque: 'O extrato mostra cada movimentação e o saldo depois dela.',
     app: 'No Trilha HUB, o extrato completo chega por link no WhatsApp.',
     efeito: (st, ok) => { if (ok) creditar(st, 10, 'Prêmio do Contador esperto'); } },
   { id: 'ajudante', tipo: 'bussola', titulo: 'Ajudante da Loja de utilidades',
     historia: 'Você ajudou a montar a Loja de utilidades e ganhou 20 BC.',
     pergunta: 'Onde esse crédito aparece?',
-    opcoes: ['No extrato, com o saldo depois dele', 'Só no fim do jogo', 'Não aparece'],
+    opcoes: ['No extrato, com o saldo depois dele', 'Só quando o evento acaba', 'Só se você pedir um comprovante'],
     certa: 0, porque: 'Todo crédito entra no extrato na hora, com o saldo atualizado.',
     efeito: (st) => creditar(st, 20, 'Ajuda na Loja de utilidades') },
   { id: 'promo', tipo: 'bussola', titulo: 'Promoção relâmpago',
     historia: 'Sua próxima compra sai 5 BC mais barata.',
     pergunta: 'Como saber quanto foi cobrado de verdade?',
-    opcoes: ['Pelo aviso de gasto, que mostra o valor e o saldo', 'Perguntando a outro jogador', 'Não dá para saber'],
+    opcoes: ['Pelo aviso de gasto, que mostra o valor e o saldo', 'Pelo preço que estava na vitrine', 'Só no fim do evento, no extrato final'],
     certa: 0, porque: 'Cada gasto gera um aviso com o valor cobrado e o saldo que sobrou.',
     efeito: (st) => { st.desconto = 5; aviso(st, 'info', 'Promoção guardada: 5 BC de desconto na próxima compra.'); } },
   { id: 'achado', tipo: 'bussola', titulo: 'Achado devolvido',
@@ -111,13 +116,13 @@ export const CARTAS = [
   { id: 'celular', tipo: 'tempestade', titulo: 'Celular caiu na barraca',
     historia: 'O celular caiu na barraca e você passa a próxima rodada procurando.',
     pergunta: 'Por que cuidar bem do celular no acampamento?',
-    opcoes: ['Porque nele estão a conta e os avisos de gasto', 'Porque o jogo precisa dele', 'Não faz diferença'],
+    opcoes: ['Porque nele estão a conta e os avisos de gasto', 'Porque a carteira só funciona com o celular ligado à tomada', 'Porque o saldo some se o celular for desligado'],
     certa: 0, porque: 'A conta e os avisos ficam no celular. Perder o aparelho é perder o controle dos gastos.',
     efeito: (st) => { st.skip = Math.max(st.skip, 1); aviso(st, 'alerta', 'Você vai passar a próxima rodada procurando o celular.'); } },
   { id: 'lojista', tipo: 'tempestade', titulo: 'Lojista distraído',
     historia: 'O lojista está distraído: sua próxima compra vai custar 5 BC a mais.',
     pergunta: 'Como perceber um valor errado?',
-    opcoes: ['Conferindo o aviso de gasto logo depois da compra', 'Esperando o fim do evento', 'Não tem como'],
+    opcoes: ['Conferindo o aviso de gasto logo depois da compra', 'Conferindo só o saldo no fim do evento', 'Pedindo o troco em dinheiro'],
     certa: 0, porque: 'O aviso de gasto chega na hora. Conferir na hora é o jeito de pegar erros.',
     efeito: (st) => { st.extra = 5; aviso(st, 'alerta', 'Atenção: a próxima compra vai custar 5 BC a mais.'); } },
   { id: 'ponte', tipo: 'tempestade', titulo: 'Ponte quebrada',
@@ -125,19 +130,25 @@ export const CARTAS = [
     pergunta: 'Pedágio é um gasto de valor avulso. O que acontece se o saldo não cobrir?',
     opcoes: ['O saldo fica negativo', 'O pagamento é recusado', 'Paga depois'],
     certa: 1, porque: 'A conta é pré-paga: sem saldo, o pagamento é recusado.',
-    efeito: (st) => pagarOuParar(st, 8, 'Pedágio extra da ponte quebrada') },
+    efeito: (st) => { if (!protegido(st, 'corda', 'a ponte quebrada não te atrasou')) pagarOuParar(st, 8, 'Pedágio extra da ponte quebrada'); } },
   { id: 'chuva', tipo: 'tempestade', titulo: 'Chuva forte',
     historia: 'Chuva forte na trilha! Você volta 2 casas.',
     pergunta: 'Antes de gastar, o que vale a pena conferir?',
-    opcoes: ['O saldo da conta', 'A previsão do tempo', 'Nada'],
+    opcoes: ['O saldo da conta', 'O limite de crédito disponível', 'A data de validade da pulseira'],
     certa: 0, porque: 'Conferir o saldo antes evita compras recusadas.',
     efeito: (st) => andar(st, -2, false) },
   { id: 'lona', tipo: 'tempestade', titulo: 'Furou a lona da barraca',
     historia: 'A lona da barraca furou e o conserto custa 5 BC.',
     pergunta: 'Um gasto inesperado apareceu. Onde ele fica registrado?',
-    opcoes: ['No extrato e no aviso de gasto', 'Em lugar nenhum', 'Só num papel'],
+    opcoes: ['No extrato e no aviso de gasto', 'Só no aviso, e some do extrato', 'Só no caixa do evento'],
     certa: 0, porque: 'Todo gasto, até o inesperado, entra no extrato e gera aviso.',
-    efeito: (st) => pagarOuParar(st, 5, 'Conserto da lona') },
+    efeito: (st) => { if (!protegido(st, 'lona', 'a barraca não furou')) pagarOuParar(st, 5, 'Conserto da lona'); } },
+  { id: 'machucado', tipo: 'tempestade', titulo: 'Machucado na trilha',
+    historia: 'Você se machucou na trilha e o curativo custa 10 BC.',
+    pergunta: 'O curativo foi cobrado e você não reconhece o valor. O que fazer?',
+    opcoes: ['Conferir o aviso de gasto e o extrato, e falar com a chefia', 'Esperar o fim do evento para reclamar', 'Pagar de novo para compensar'],
+    certa: 0, porque: 'O aviso de gasto e o extrato mostram o que foi cobrado, na hora. Com isso a chefia confere o valor.',
+    efeito: (st) => { if (!protegido(st, 'kitps', 'o curativo estava no kit')) pagarOuParar(st, 10, 'Curativo'); } },
 ];
 
 // Cartas de sala (A2): valem para todos os jogadores da sala e só saem em salas, nunca no jogo sozinho.
@@ -204,15 +215,60 @@ function hashTexto(t) {
   return h >>> 0;
 }
 
-export function eventosDaPartida(seed, rodadas) {
-  const r = rngComSemente(seed);
-  const l1 = LOJAS[Math.floor(r() * LOJAS.length)];
-  const l2 = LOJAS[Math.floor(r() * LOJAS.length)];
+// C2 e F4: um evento a cada 3 rodadas, sorteado entre 8, igual para a sala toda (mesma semente).
+// Os efeitos em BC valem no começo da rodada do evento, para cada jogador na sua vez.
+export const EVENTOS = {
+  feira:    { nome: 'Feira', loja: true, duracao: 2 },
+  energia:  { nome: 'Queda de energia', loja: true, duracao: 2 },
+  chuva:    { nome: 'Chuva', duracao: 1 },
+  visita:   { nome: 'Visita dos pais', duracao: 1 },
+  cantina:  { nome: 'Cantina aberta', duracao: 1 },
+  jogo:     { nome: 'Jogo noturno', duracao: 1 },
+  inspecao: { nome: 'Inspeção de barraca', duracao: 1 },
+  mutirao:  { nome: 'Mutirão', duracao: 1 },
+};
+
+// Texto curto do que vai acontecer, para o anúncio de uma rodada antes (C1) e para a votação (A5).
+export function descreverEvento(ev) {
+  const loja = ev.loja ? CASAS[ev.loja].nome : '';
   return {
-    fechada: { rodada: Math.max(2, Math.round(rodadas * 0.35)), loja: l1, duracao: 2 },
-    feira:   { rodada: Math.max(3, Math.round(rodadas * 0.65)), loja: l2, duracao: 2, desconto: 5 },
-  };
+    feira: `Feira: ${loja} com ${DESCONTO_FEIRA} BC de desconto por item`,
+    energia: `Queda de energia: ${loja} fechada`,
+    chuva: 'Chuva: quem não tem Lona paga 5 BC',
+    visita: 'Visita dos pais: recarga de 30 BC por Pix (recusada inteira se a conta passar de 300 BC)',
+    cantina: 'Cantina aberta: o lanche custa 8 BC, e quem tem Panela leva marmita e não paga',
+    jogo: 'Jogo noturno: quem não tem Lanterna paga 5 BC de aluguel',
+    inspecao: 'Inspeção de barraca: quem não tem Kit primeiros socorros paga 8 BC',
+    mutirao: 'Mutirão: todos ganham 10 BC',
+  }[ev.tipo];
 }
+
+const rodadasDeEvento = (rodadas) => { const r = []; for (let n = 3; n <= rodadas; n += 3) r.push(n); return r; };
+function montarEvento(seed, tipo, i) {
+  const ev = { tipo };
+  if (EVENTOS[tipo].loja) ev.loja = LOJAS[Math.floor(rngComSemente((seed * 131 + i) >>> 0)() * LOJAS.length)];
+  return ev;
+}
+function tiposEmOrdem(seed) {
+  const r = rngComSemente((seed ^ 0x51ED) >>> 0), t = Object.keys(EVENTOS);
+  for (let i = t.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [t[i], t[j]] = [t[j], t[i]]; }
+  return t;
+}
+// As duas opções que a sala vota antes do evento `i` (a primeira é a que sai se ninguém votar).
+export function opcoesDoEvento(seed, i) {
+  const t = tiposEmOrdem(seed);
+  return [t[i % t.length], t[(i + 4) % t.length]].map((tp) => montarEvento(seed, tp, i));
+}
+export function agendaDaPartida(seed, rodadas) {
+  return rodadasDeEvento(rodadas).map((rodada, i) => ({ rodada, ...opcoesDoEvento(seed, i)[0] }));
+}
+// A5: depois da votação, o evento escolhido entra na agenda do jogador.
+export function definirEvento(st, rodada, ev) {
+  const i = st.agenda.findIndex((e) => e.rodada === rodada);
+  if (i >= 0) st.agenda[i] = { rodada, ...ev };
+}
+// C3: o leilão do Canivete é na metade da partida.
+export const rodadaDoLeilao = (rodadas) => Math.round(rodadas / 2);
 
 // F1: a ordem das 3 opções de cada carta muda a cada partida, igual para a sala toda.
 export function ordemOpcoes(seed, cartaId) {
@@ -257,8 +313,9 @@ export function novoJogador({ apelido, ficha, rodadas = RODADAS_PADRAO, seed = 1
     rolou: false, feito: false, dado: null, pend: null, resposta: null, ultimo: null,
     fim: false, fogo: 0,
     meta: metaDoJogador(seed, ordem),
-    stats: { minSaldo: SALDO_INICIAL, maxSaldo: SALDO_INICIAL, recusas: 0, perdidas: 0, ajudas: 0, duplos: 0, lojas: [], lanterna: null },
-    eventos: eventosDaPartida(seed, rodadas),
+    stats: { creditosRecusados: 0, minSaldo: SALDO_INICIAL, maxSaldo: SALDO_INICIAL, recusas: 0, perdidas: 0, ajudas: 0, duplos: 0, lojas: [], lanterna: null },
+    agenda: agendaDaPartida(seed, rodadas),
+    duploGratis: 0, canivete: false, acertosNoite: 0,
     extrato: [{ d: 'Saldo inicial', v: SALDO_INICIAL, s: SALDO_INICIAL }],
     avisos: [{ tipo: 'info', texto: `Bem-vindo, ${apelido}! Sua conta BadenCoin começa com ${SALDO_INICIAL} BC.` }],
     saida: [], // movimentos e jogadas novos, para o servidor gravar (o navegador ignora)
@@ -284,9 +341,14 @@ function recusar(st, valor, d) {
   st.cena.push({ t: 'recusa', v: valor, d });
 }
 
+// C4: nas últimas rodadas ("noite no acampamento") créditos e acertos valem em dobro.
+export function noite(st) { return rodadaAtual(st) > st.rodadas - NOITE_RODADAS; }
+
 export function creditar(st, valor, d, tipo = 'credito') {
+  if (noite(st)) { valor *= 2; d += ' (em dobro: noite)'; }
   if (st.saldo + valor > SALDO_MAX) {
     aviso(st, 'alerta', `Crédito de ${valor} BC recusado: a conta passaria do saldo máximo de ${SALDO_MAX} BC.`);
+    st.stats.creditosRecusados += 1;
     st.cena.push({ t: 'recusa', v: valor, d, credito: true });
     return false;
   }
@@ -298,7 +360,7 @@ export function creditar(st, valor, d, tipo = 'credito') {
   return true;
 }
 
-const TIPO_DEBITO = { loja: 'compra', dado: 'dado_duplo', pedagio: 'pedagio' };
+const TIPO_DEBITO = { loja: 'compra', dado: 'dado_duplo', pedagio: 'pedagio', leilao: 'leilao' };
 
 export function debitar(st, valor, d, onde) {
   if (st.saldo < valor) return false;
@@ -315,6 +377,15 @@ function pagarOuParar(st, valor, d) {
     recusar(st, valor, d);
     aviso(st, 'alerta', `Pagamento de ${valor} BC recusado: saldo de ${st.saldo} BC não cobre. Você perde a próxima rodada.`);
   }
+}
+
+// B5: cada item do kit protege de um revés. Devolve true (e avisa) se o jogador tem o item.
+function protegido(st, itemId, motivo) {
+  if (!st.kit.includes(itemId)) return false;
+  const item = ITENS.find((i) => i.id === itemId);
+  aviso(st, 'ok', `${item.nome} protegeu você: ${motivo}.`);
+  st.cena.push({ t: 'protegeu', item: itemId });
+  return true;
 }
 
 // Cobrança que veio de uma carta de sala: o jogador não fez nada, então recusar não tira a vez dele.
@@ -336,14 +407,12 @@ function andar(st, passos, resolver, rng) {
   if (resolver) resolverCasa(st, rng);
 }
 
-export function lojaFechada(st, loja) {
-  const e = st.eventos.fechada, n = rodadaAtual(st);
-  return e.loja === loja && n >= e.rodada && n < e.rodada + e.duracao;
-}
-export function descontoFeira(st, loja) {
-  const e = st.eventos.feira, n = rodadaAtual(st);
-  return e.loja === loja && n >= e.rodada && n < e.rodada + e.duracao ? e.desconto : 0;
-}
+const eventoAtivo = (st, tipo, loja) => st.agenda.some((e) => {
+  const n = rodadaAtual(st);
+  return e.tipo === tipo && e.loja === loja && n >= e.rodada && n < e.rodada + EVENTOS[tipo].duracao;
+});
+export function lojaFechada(st, loja) { return eventoAtivo(st, 'energia', loja); }
+export function descontoFeira(st, loja) { return eventoAtivo(st, 'feira', loja) ? DESCONTO_FEIRA : 0; }
 export function precoItem(st, item) { return Math.max(0, item.preco - descontoFeira(st, item.loja)); }
 
 export function totalCompra(st, ids) {
@@ -374,7 +443,8 @@ function resolverCasa(st, rng) {
   } else if (casa === 'pedagio') {
     st.pend = { tipo: 'pedagio', valor: 2 + Math.floor(rng() * 11) };
   } else if (casa === 'perdido') {
-    st.pend = { tipo: 'perdido', valor: PERDIDO_TAXA };
+    // B5: a Lanterna mostra o caminho, e o jogador segue sem pagar.
+    if (!protegido(st, 'lanterna', 'você não se perdeu na trilha')) st.pend = { tipo: 'perdido', valor: PERDIDO_TAXA };
   } else if (casa === 'bussola' || casa === 'tempestade') {
     const pool = baralho(st, casa);
     st.pend = { tipo: 'carta', carta: pool[Math.floor(rng() * pool.length)].id };
@@ -389,7 +459,7 @@ function resolverCasa(st, rng) {
 export function opcoesDaRodada(st) {
   if (st.fim || st.rolou) return { rolar: false, duplo: false, ajudar: false };
   if (st.skip > 0) return { rolar: true, duplo: false, ajudar: false };
-  return { rolar: true, duplo: st.saldo >= DADO_DUPLO_CUSTO, ajudar: st.saldo + AJUDA_GANHO <= SALDO_MAX };
+  return { rolar: true, duplo: st.duploGratis > 0 || st.saldo >= DADO_DUPLO_CUSTO, ajudar: st.saldo + AJUDA_GANHO <= SALDO_MAX };
 }
 
 function registrarJogada(st, dado, rolagem) {
@@ -423,8 +493,13 @@ export function dadoDuplo(st, rng = Math.random) {
   if (st.fim) return { erro: 'A partida já terminou.' };
   if (st.rolou) return { erro: 'Você já jogou nesta rodada.' };
   if (st.skip > 0) return { erro: 'Você está parado: esta rodada só passa.' };
-  if (st.saldo < DADO_DUPLO_CUSTO) return { erro: `O dado duplo custa ${DADO_DUPLO_CUSTO} BC e você tem ${st.saldo} BC.` };
-  debitar(st, DADO_DUPLO_CUSTO, 'Dado duplo', 'dado');
+  if (st.duploGratis > 0) {
+    st.duploGratis -= 1;
+    aviso(st, 'ok', 'A Bússola deu um dado duplo de graça.');
+  } else {
+    if (st.saldo < DADO_DUPLO_CUSTO) return { erro: `O dado duplo custa ${DADO_DUPLO_CUSTO} BC e você tem ${st.saldo} BC.` };
+    debitar(st, DADO_DUPLO_CUSTO, 'Dado duplo', 'dado');
+  }
   st.rolou = true; st.resposta = null; st.feito = false;
   st.stats.duplos += 1;
   const a = 1 + Math.floor(rng() * 6), b = 1 + Math.floor(rng() * 6);
@@ -471,6 +546,7 @@ export function comprar(st, ids) {
     return { erro: `Compra recusada: você tem ${st.saldo} BC e a compra custa ${total} BC.` };
   }
   st.kit.push(...itens.map((i) => i.id));
+  if (itens.some((i) => i.id === 'bussola')) st.duploGratis += 1;
   if (!st.stats.lojas.includes(st.pend.loja)) st.stats.lojas.push(st.pend.loja);
   if (itens.some((i) => i.id === 'lanterna') && st.stats.lanterna == null) st.stats.lanterna = rodadaAtual(st);
   st.desconto = 0; st.extra = 0;
@@ -508,7 +584,7 @@ export function responder(st, i, rng = Math.random, estados = null) {
   if (!st.pend || st.pend.tipo !== 'carta') return { erro: 'Não há carta para responder.' };
   const c = cartaMostrada(st, st.pend.carta);
   const ok = i === c.certa;
-  if (ok) st.acertos += 1;
+  if (ok) { st.acertos += 1; if (noite(st)) st.acertosNoite += 1; }
   st.pend = null; st.feito = true;
   // B4: acertar uma carta de Tempestade evita o revés.
   const evitou = ok && c.tipo === 'tempestade';
@@ -590,6 +666,52 @@ export function tempoEsgotado(st, rng = Math.random, ctx = null, id = null) {
   st.ultimo = (st.ultimo ? st.ultimo + ' ' : '') + '(Tempo esgotado: o sistema jogou por você.)';
 }
 
+// Efeitos de um evento para este jogador, no começo da rodada do evento.
+function aplicarEvento(st, ev) {
+  const nome = EVENTOS[ev.tipo].nome, ate = ev.rodada + EVENTOS[ev.tipo].duracao - 1;
+  st.cena.push({ t: 'evento', tipo: ev.tipo, loja: ev.loja || null });
+  const rodadas = ate > ev.rodada ? `nas rodadas ${ev.rodada} e ${ate}` : 'nesta rodada';
+  switch (ev.tipo) {
+    case 'feira': aviso(st, 'info', `Feira! ${CASAS[ev.loja].nome} com ${DESCONTO_FEIRA} BC de desconto por item ${rodadas}.`); break;
+    case 'energia': aviso(st, 'alerta', `Queda de energia: a ${CASAS[ev.loja].nome} fica fechada ${rodadas}.`); break;
+    case 'chuva':
+      aviso(st, 'alerta', 'Chuva forte no acampamento!');
+      if (!protegido(st, 'lona', 'a chuva não molhou o acampamento')) cobrarDaSala(st, 5, 'Reparos da chuva');
+      break;
+    case 'visita': aviso(st, 'info', 'Visita dos pais! Eles fizeram uma recarga por Pix de 30 BC.'); creditar(st, 30, 'Recarga dos pais por Pix'); break;
+    case 'cantina':
+      aviso(st, 'info', 'Cantina aberta!');
+      if (!protegido(st, 'panela', 'você levou marmita e não pagou o lanche')) cobrarDaSala(st, 8, 'Lanche na cantina');
+      break;
+    case 'jogo':
+      aviso(st, 'info', 'Jogo noturno!');
+      if (!protegido(st, 'lanterna', 'você usou a sua lanterna e não pagou aluguel')) cobrarDaSala(st, 5, 'Aluguel de lanterna no jogo noturno');
+      break;
+    case 'inspecao':
+      aviso(st, 'info', 'Inspeção de barraca!');
+      if (!protegido(st, 'kitps', 'a inspeção passou sem multa')) cobrarDaSala(st, 8, 'Multa da inspeção de barraca');
+      break;
+    case 'mutirao': aviso(st, 'info', 'Mutirão no acampamento!'); creditar(st, 10, 'Mutirão no acampamento'); break;
+    default: aviso(st, 'info', nome);
+  }
+}
+
+// Anúncio (C1) uma rodada antes e efeito do evento (C2) na rodada dele.
+function comecarRodada(st) {
+  const n = rodadaAtual(st);
+  for (const ev of st.agenda) {
+    if (n === ev.rodada - 1) {
+      aviso(st, 'info', `Na próxima rodada: ${descreverEvento(ev)}.`);
+      st.cena.push({ t: 'anuncio', tipo: ev.tipo, loja: ev.loja || null });
+    }
+    if (n === ev.rodada) aplicarEvento(st, ev);
+  }
+  if (n === st.rodadas - NOITE_RODADAS + 1) {
+    aviso(st, 'info', 'Noite no acampamento! Nas últimas rodadas, créditos e cartas certas valem em dobro.');
+    st.cena.push({ t: 'noite' });
+  }
+}
+
 // Fecha a rodada do jogador. Devolve false se ele ainda não terminou a jogada.
 export function fecharRodada(st) {
   if (!st.feito || st.fim) return false;
@@ -599,20 +721,45 @@ export function fecharRodada(st) {
     aviso(st, 'info', 'Fim do mercado! A conta foi congelada e o que sobrou vira pontos.');
     return true;
   }
-  const n = rodadaAtual(st), ef = st.eventos.fechada, fe = st.eventos.feira;
-  if (n === ef.rodada) aviso(st, 'alerta', `Queda de energia: a ${CASAS[ef.loja].nome} fica fechada nas rodadas ${ef.rodada} e ${ef.rodada + 1}.`);
-  if (n === fe.rodada) aviso(st, 'info', `Feira! ${CASAS[fe.loja].nome} com ${fe.desconto} BC de desconto por item nas rodadas ${fe.rodada} e ${fe.rodada + 1}.`);
+  comecarRodada(st);
+  return true;
+}
+
+// C6: rodada perdida passa sozinha, sem clique. Na sala de espera isso acontece quando a rodada abre
+// para todos (`rodadaPerdida`); nos outros modos, logo depois de a rodada anterior fechar.
+export function rodadaPerdida(st) {
+  if (st.fim || st.rolou || st.skip <= 0) return false;
+  rolar(st);
+  return true;
+}
+export function passarRodadasPerdidas(st) {
+  while (rodadaPerdida(st)) fecharRodada(st);
+}
+
+// C3: lance único e fechado; ganha o maior lance (mínimo 10 BC) e, no empate, quem tem menos saldo.
+export function lanceValido(st, valor) { return LANCES.includes(valor) && valor <= st.saldo; }
+export function resolverLeilao(lances) {
+  const validos = lances.filter((l) => l.valor >= 10 && l.valor <= l.saldo);
+  validos.sort((a, b) => (b.valor - a.valor) || (a.saldo - b.saldo) || (a.ordem - b.ordem));
+  return validos[0] || null;
+}
+export function vencerLeilao(st, valor) {
+  if (!debitar(st, valor, 'Canivete no leilão', 'leilao')) return false;
+  st.canivete = true;
+  aviso(st, 'ok', `Você levou o Canivete no leilão por ${valor} BC: +${CANIVETE_PTS} pts no fim.`);
+  st.cena.push({ t: 'canivete' });
   return true;
 }
 
 export function pontuacao(st) {
   const itens = st.kit.length * 10;
   const kitCompleto = st.kit.length === ITENS.length ? 20 : 0;
-  const cartas = st.acertos * PTS_CARTA;
+  const cartas = (st.acertos + st.acertosNoite) * PTS_CARTA;
   const saldo = Math.floor(st.saldo / 10);
   // A meta secreta só conta quando a partida acaba, para não entregar a meta pelo placar.
   const meta = st.fim && metaCumprida(st) ? METAS.find((m) => m.id === st.meta).pts : 0;
-  return { itens, kitCompleto, cartas, saldo, meta, total: itens + kitCompleto + cartas + saldo + meta };
+  const canivete = st.canivete ? CANIVETE_PTS : 0;
+  return { itens, kitCompleto, cartas, saldo, meta, canivete, total: itens + kitCompleto + cartas + saldo + meta + canivete };
 }
 
 // Ordena o placar: pontos; desempate por saldo final e depois por cartas acertadas.

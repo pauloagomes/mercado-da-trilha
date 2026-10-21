@@ -2,13 +2,13 @@
 // Serve ao npm test (test/balanceamento.test.js) e ao comando `npm run simular`.
 // Recebe o módulo do motor por parâmetro para poder comparar com uma versão antiga.
 
-export const ETAPA = 1;
+export const ETAPA = 2;
 
 // Meta final (RFC) e faixa mínima que a etapa atual precisa cumprir.
 // `etapa` é a faixa que a etapa atual precisa cumprir; `lancamento` é a meta do RFC para ir ao ar.
 export const FAIXAS = {
   semEscolha:    { rotulo: 'Rodadas sem nenhuma escolha, em 12', lancamento: [0, 1],       etapa: [0, 1] },
-  venceQuemSabe: { rotulo: 'Quem sabe as regras vence numa mesa de 4', lancamento: [0.44, 1], etapa: [0.4, 1] },
+  venceQuemSabe: { rotulo: 'Quem sabe as regras vence numa mesa de 4', lancamento: [0.44, 1], etapa: [0.44, 1] },
   recusou:       { rotulo: 'Partidas com pagamento recusado', lancamento: [0.3, 0.5],      etapa: [0.12, 0.5] },
 };
 
@@ -112,7 +112,8 @@ export function jogarPartida(E, politicas, { rodadas = 12, seed = 1 } = {}) {
   for (let r = 0; r < rodadas; r++) {
     politicas.forEach((pol, i) => {
       const st = ctx.estados.get(i);
-      if (st.fim) return;
+      // Rodada perdida passa sozinha (C6): quem já avançou além de `r` não joga de novo.
+      if (st.fim || st.rodada > r) return;
       let pendVisto = null;
       const ag = (m) => {
         const res = E.agirNaSala ? E.agirNaSala(ctx, i, m, rng) : acaoLegada(E, st, rng, m);
@@ -123,11 +124,12 @@ export function jogarPartida(E, politicas, { rodadas = 12, seed = 1 } = {}) {
       };
       if (!jogarRodada(E, ctx, i, pol, rng, ag)) medidas[i].semEscolha += 1;
       E.fecharRodada(st);
+      E.passarRodadasPerdidas?.(st);
     });
   }
   return politicas.map((_, i) => {
     const st = ctx.estados.get(i), m = medidas[i];
-    if (st.stats) m.recusou = st.stats.recusas > 0;
+    if (st.stats) { m.recusou = st.stats.recusas > 0; m.tetoRecusado = st.stats.creditosRecusados > 0; m.semEscolha += st.stats.perdidas; }
     m.comemorou = st.fogo > 0 || st.kit.length === E.ITENS.length || st.acertos > 0;
     m.pontos = E.pontuacao(st);
     return { st, ...m };
@@ -144,6 +146,7 @@ export function medirSolo(E, { n = 3000, politica = REFERENCIA, rodadas = 12 } =
     semEscolha: media(jogos.map((j) => j.semEscolha)),
     kitCompleto: media(jogos.map((j) => (j.st.kit.length === E.ITENS.length ? 1 : 0))),
     recusou: media(jogos.map((j) => (j.recusou ? 1 : 0))),
+    tetoRecusado: media(jogos.map((j) => (j.tetoRecusado ? 1 : 0))),
     semComemoracao: media(jogos.map((j) => (j.comemorou ? 0 : 1))),
     saldoFinal: media(jogos.map((j) => j.st.saldo)),
     pontos: media(jogos.map((j) => j.pontos.total)),

@@ -18,6 +18,7 @@ for (const [k, fx] of Object.entries(FAIXAS)) console.log(fx.rotulo.padEnd(46), 
 console.log('\nAcompanhadas (sem faixa nesta etapa):');
 console.log(`  Partidas sem nenhuma comemoração .... ${pct(solo.semComemoracao)} (antes: ${pct(antes.semComemoracao)}) · meta 0% (D6, etapa 2)`);
 console.log(`  Cartas já vistas em 3 partidas ...... ${pct(rep)} · meta 15% ou menos (F3, etapa 3)`);
+console.log(`  Partidas com crédito recusado pelo teto de 300 BC  ${pct(solo.tetoRecusado)} (antes: ${pct(antes.tetoRecusado)})`);
 console.log(`  Kit completo ......................... ${pct(solo.kitCompleto)} (antes: ${pct(antes.kitCompleto)})`);
 console.log(`  Saldo final médio .................... ${solo.saldoFinal.toFixed(0)} BC (antes: ${antes.saldoFinal.toFixed(0)} BC)`);
 console.log(`  Pontos por partida ................... ${solo.pontos.toFixed(1)} (antes: ${antes.pontos.toFixed(1)}; escolhendo bem o dado: ${esperto.pontos.toFixed(1)}; cuidadoso: ${cuidadoso.pontos.toFixed(1)})`);

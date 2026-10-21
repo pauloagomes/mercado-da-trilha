@@ -12,7 +12,7 @@ test('tabuleiro tem 20 casas com as quantidades do plano', () => {
     [c('partida'), c('agencia'), c('util'), c('exp'), c('enf'), c('pedagio'), c('bussola'), c('tempestade'), c('perdido'), c('fogo')],
     [1, 2, 3, 3, 2, 2, 2, 3, 1, 1],
   );
-  assert.equal(E.CARTAS.length, 11);
+  assert.equal(E.CARTAS.length, 12);
   assert.equal(E.ITENS.reduce((s, i) => s + i.preco, 0), 140);
   assert.equal(E.FICHAS.length, 12);
 });
@@ -84,17 +84,19 @@ test('tempo esgotado: carta conta como errada e loja sai sem comprar', () => {
 test('pontuação e desempate', () => {
   const st = E.novoJogador({ apelido: 'Gil', ficha: 'f07', seed: 1 });
   st.kit = E.ITENS.map((i) => i.id); st.acertos = 3; st.saldo = 45;
-  assert.deepEqual(E.pontuacao(st), { itens: 70, kitCompleto: 20, cartas: 30, saldo: 4, meta: 0, total: 124 });
+  assert.deepEqual(E.pontuacao(st), { itens: 70, kitCompleto: 20, cartas: 30, saldo: 4, meta: 0, canivete: 0, total: 124 });
   const lista = [{ pontos: 50, saldo: 10, acertos: 1 }, { pontos: 50, saldo: 30, acertos: 0 }, { pontos: 60, saldo: 0, acertos: 0 }];
   lista.sort(E.compararPlacar);
   assert.deepEqual(lista.map((x) => x.pontos + '/' + x.saldo), ['60/0', '50/30', '50/10']);
 });
 
-test('eventos são iguais para a mesma semente', () => {
-  assert.deepEqual(E.eventosDaPartida(42, 12), E.eventosDaPartida(42, 12));
-  const ev = E.eventosDaPartida(42, 12);
-  assert.equal(ev.fechada.rodada, 4);
-  assert.equal(ev.feira.rodada, 8);
+test('eventos são iguais para a mesma semente e vêm a cada 3 rodadas', () => {
+  assert.deepEqual(E.agendaDaPartida(42, 12), E.agendaDaPartida(42, 12));
+  assert.deepEqual(E.agendaDaPartida(42, 12).map((e) => e.rodada), [3, 6, 9, 12]);
+  assert.deepEqual(E.agendaDaPartida(42, 8).map((e) => e.rodada), [3, 6]);
+  assert.deepEqual(E.agendaDaPartida(42, 16).map((e) => e.rodada), [3, 6, 9, 12, 15]);
+  for (const e of E.agendaDaPartida(7, 12)) assert.ok(E.EVENTOS[e.tipo]);
+  assert.equal(new Set(E.agendaDaPartida(7, 12).map((e) => e.tipo)).size, 4, 'sem repetir evento na partida');
 });
 
 test('pedágio sem saldo faz perder a próxima rodada', () => {
@@ -322,4 +324,143 @@ test('tempo esgotado joga todas as pendências, inclusive dado duplo e Perdido s
   p.rolou = true; p.saldo = 3; p.pend = { tipo: 'perdido', valor: 10 };
   E.tempoEsgotado(p, seq(dado(2)));
   assert.equal(p.skip, 1);
+});
+
+// ---------- Etapa 2 ----------
+const jogo = (extra = {}) => Object.assign(E.novoJogador({ apelido: 'Lia', ficha: 'f01', rodadas: 12, seed: 3 }), extra);
+const avancar = (st, ate) => { while (E.rodadaAtual(st) < ate) { st.feito = true; E.fecharRodada(st); } };
+const avisos = (st) => st.avisos.map((a) => a.texto).join(' | ');
+
+test('C1: o evento é anunciado uma rodada antes e vale na rodada dele', () => {
+  const st = jogo({ agenda: [{ rodada: 3, tipo: 'feira', loja: 'exp' }] });
+  avancar(st, 2);
+  assert.match(avisos(st), /Na próxima rodada: Feira: Loja do Explorador/);
+  assert.ok(st.cena.some((c) => c.t === 'anuncio' && c.tipo === 'feira'));
+  assert.equal(E.descontoFeira(st, 'exp'), 0, 'ainda não começou');
+  avancar(st, 3);
+  assert.equal(E.descontoFeira(st, 'exp'), 5);
+  assert.equal(E.descontoFeira(st, 'util'), 0);
+  avancar(st, 4);
+  assert.equal(E.descontoFeira(st, 'exp'), 5, 'a feira dura 2 rodadas');
+  avancar(st, 5);
+  assert.equal(E.descontoFeira(st, 'exp'), 0);
+});
+
+test('C2: queda de energia fecha a loja por 2 rodadas', () => {
+  const st = jogo({ agenda: [{ rodada: 3, tipo: 'energia', loja: 'enf' }] });
+  avancar(st, 3);
+  assert.equal(E.lojaFechada(st, 'enf'), true);
+  avancar(st, 5);
+  assert.equal(E.lojaFechada(st, 'enf'), false);
+});
+
+test('F4: efeitos em BC dos eventos, com a proteção dos itens', () => {
+  const roda = (tipo, extra = {}) => { const st = jogo({ agenda: [{ rodada: 3, tipo }], ...extra }); avancar(st, 3); return st; };
+  assert.equal(roda('chuva').saldo, 95);
+  assert.equal(roda('chuva', { kit: ['lona'] }).saldo, 100);
+  assert.match(avisos(roda('chuva', { kit: ['lona'] })), /Lona protegeu/);
+  assert.equal(roda('visita').saldo, 130);
+  assert.equal(roda('visita', { saldo: 280 }).saldo, 280, 'a recarga que passaria de 300 BC é recusada inteira');
+  assert.equal(roda('visita', { saldo: 280 }).stats.creditosRecusados, 1);
+  assert.equal(roda('cantina').saldo, 92);
+  assert.equal(roda('cantina', { kit: ['panela'] }).saldo, 100);
+  assert.equal(roda('jogo').saldo, 95);
+  assert.equal(roda('jogo', { kit: ['lanterna'] }).saldo, 100);
+  assert.equal(roda('inspecao').saldo, 92);
+  assert.equal(roda('inspecao', { kit: ['kitps'] }).saldo, 100);
+  assert.equal(roda('mutirao').saldo, 110);
+  const pobre = roda('inspecao', { saldo: 3 });
+  assert.equal(pobre.saldo, 3);
+  assert.equal(pobre.skip, 0, 'recusa por evento não tira a vez');
+  assert.equal(pobre.stats.recusas, 1);
+});
+
+test('C4: nas últimas 3 rodadas créditos e cartas certas valem em dobro', () => {
+  const st = jogo({ agenda: [] });
+  avancar(st, 9);
+  assert.equal(E.noite(st), false);
+  E.creditar(st, 10, 'x');
+  assert.equal(st.saldo, 110);
+  avancar(st, 10);
+  assert.equal(E.noite(st), true);
+  assert.match(avisos(st), /Noite no acampamento/);
+  E.creditar(st, 10, 'x');
+  assert.equal(st.saldo, 130);
+  st.pend = { tipo: 'carta', carta: 'contador' };
+  E.responder(st, E.cartaMostrada(st, 'contador').certa);
+  assert.equal(st.acertos, 1);
+  assert.equal(st.acertosNoite, 1);
+  assert.equal(E.pontuacao(st).cartas, 20);
+  assert.equal(st.saldo, 150, 'o prêmio da carta também dobra');
+});
+
+test('B5: cada item protege de um revés', () => {
+  const carta = (id, extra) => { const st = jogo(extra); st.rolou = true; st.pend = { tipo: 'carta', carta: id }; const m = E.cartaMostrada(st, id); E.responder(st, (m.certa + 1) % 3); return st; };
+  assert.equal(carta('ponte', {}).saldo, 92);
+  assert.equal(carta('ponte', { kit: ['corda'] }).saldo, 100);
+  assert.equal(carta('lona', { kit: ['lona'] }).saldo, 100);
+  assert.equal(carta('machucado', {}).saldo, 90);
+  assert.equal(carta('machucado', { kit: ['kitps'] }).saldo, 100);
+  const perdido = jogo({ kit: ['lanterna'], pos: 4 });
+  E.rolar(perdido, seq(dado(1)));
+  assert.equal(perdido.pend, null, 'com Lanterna não se perde na trilha');
+  assert.ok(perdido.feito);
+});
+
+test('B5: a Bússola dá um dado duplo de graça, uma vez', () => {
+  const st = jogo({ pos: 2 });
+  E.rolar(st, seq(dado(1))); // Loja do Explorador
+  E.comprar(st, ['bussola']);
+  assert.equal(st.duploGratis, 1);
+  E.fecharRodada(st);
+  assert.equal(E.opcoesDaRodada(st).duplo, true);
+  st.saldo = 2;
+  assert.equal(E.opcoesDaRodada(st).duplo, true, 'mesmo sem 5 BC');
+  const antes = st.saldo;
+  assert.ok(E.dadoDuplo(st, seq(dado(1), dado(2))).ok);
+  assert.equal(st.saldo, antes);
+  assert.equal(st.duploGratis, 0);
+  assert.equal(E.opcoesDaRodada(st).duplo, false);
+});
+
+test('C3: leilão com lance único e fechado, mínimo de 10 BC, desempate por menor saldo', () => {
+  const lances = [{ id: 'a', valor: 20, saldo: 80, ordem: 0 }, { id: 'b', valor: 20, saldo: 50, ordem: 1 }, { id: 'c', valor: 30, saldo: 20, ordem: 2 }];
+  assert.equal(E.resolverLeilao(lances).id, 'b', 'o lance de 30 BC é inválido: o saldo é 20 BC');
+  assert.equal(E.resolverLeilao([{ id: 'a', valor: 0, saldo: 80, ordem: 0 }]), null, 'ninguém ofereceu');
+  const st = jogo({ saldo: 60 });
+  assert.equal(E.lanceValido(st, 40), true);
+  assert.equal(E.lanceValido(jogo({ saldo: 35 }), 40), false);
+  assert.equal(E.lanceValido(st, 25), false);
+  assert.ok(E.vencerLeilao(st, 30));
+  assert.equal(st.saldo, 30);
+  assert.equal(st.saida.at(-1).tipo, 'leilao');
+  st.fim = true;
+  assert.equal(E.pontuacao(st).canivete, 15);
+  assert.equal(E.rodadaDoLeilao(12), 6);
+});
+
+test('A5: o evento votado entra na agenda no lugar do sorteado', () => {
+  const [a, b] = E.opcoesDoEvento(11, 1);
+  assert.notEqual(a.tipo, b.tipo);
+  const st = jogo({ seed: 11 });
+  E.definirEvento(st, 6, b);
+  assert.deepEqual(st.agenda.find((e) => e.rodada === 6), { rodada: 6, ...b });
+});
+
+test('C6: rodada perdida passa sozinha', () => {
+  const st = jogo({ skip: 2 });
+  st.feito = true; E.fecharRodada(st);
+  E.passarRodadasPerdidas(st);
+  assert.equal(st.rodada, 3, 'as duas rodadas perdidas já passaram');
+  assert.equal(st.skip, 0);
+  assert.equal(st.stats.perdidas, 2);
+  assert.equal(E.rodadaPerdida(st), false);
+});
+
+test('F2: nenhuma carta tem alternativa absurda', () => {
+  const absurdas = /em lugar nenhum|não faz diferença|não tem como|não dá para saber|^nada$|^não aparece$/i;
+  for (const c of [...E.CARTAS, ...E.CARTAS_SALA]) {
+    assert.equal(c.opcoes.length, 3, c.id);
+    for (const o of c.opcoes) assert.ok(!absurdas.test(o), `${c.id}: "${o}"`);
+  }
 });

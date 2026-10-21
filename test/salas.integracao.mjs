@@ -108,9 +108,68 @@ try {
   assert.equal(volta.pontes['8'], beto.id);
   assert.equal(volta.jogadores.get(beto.id).st.v, E.VERSAO_ESTADO);
   assert.deepEqual(volta.jogadores.get(ana.id).st.cena, []);
+  console.log('sala com código ok');
+
+  // ---- Etapa 2: sala de espera com janela de votação, leilão e rodada perdida automática
+  process.env.CONTAGEM_FILA_MS = '30'; process.env.RODADA_MS = '600000'; process.env.INTERVALO_MS = '600000';
+  const wa = falso(ana), wb = falso(beto);
+  S.entrarNaFila(wa, ana); S.entrarNaFila(wb, beto);
+  const ate = async (c, ms = 3000) => { const t0 = Date.now(); while (!c()) { if (Date.now() - t0 > ms) throw new Error('tempo esgotado'); await new Promise((r) => setTimeout(r, 20)); } };
+  await ate(() => wa.ultimo('partida') && wb.ultimo('partida'));
+  const esp = S._interno.salas.get(wa.ultimo('partida').codigo);
+  const A = esp.jogadores.get(ana.id), B = esp.jogadores.get(beto.id);
+  try {
+    const ajudam = async () => { await S.agir(wa, ana, { t: 'ajudar' }); await S.agir(wb, beto, { t: 'ajudar' }); };
+    await ajudam();
+    assert.ok(esp.janela && esp.voto, 'depois da rodada 1 abre a votação do evento da rodada 3');
+    assert.equal(esp.voto.rodada, 3);
+    assert.equal(esp.rodadaSync, 1, 'a rodada 2 só abre depois da votação');
+    assert.match(wa.ultimo('estado').sala.voto.opcoes[0].texto, /\w/);
+    await S.agir(wa, ana, { t: 'ajudar' }); assert.match(wa.ultimo('erro').msg, /votação/);
+    const [, opB] = E.opcoesDoEvento(esp.semente, 0);
+    S.votarEvento(wa, ana, { i: 1 }); S.votarEvento(wb, beto, { i: 1 });
+    await esp.gravando;
+    assert.ok(!esp.janela && esp.rodadaSync === 2, 'todos votaram: a janela fecha antes dos 10 s');
+    assert.equal(A.st.agenda.find((e) => e.rodada === 3).tipo, opB.tipo);
+    assert.equal(B.st.agenda.find((e) => e.rodada === 3).tipo, opB.tipo);
+    assert.match(A.st.avisos.map((a) => a.texto).join('|'), /Na próxima rodada: /, 'o evento é anunciado na rodada 2');
+    const [ev] = await rows('SELECT tipo, origem FROM eventos_sala WHERE sala_codigo = $1 AND rodada = 3', [esp.codigo]);
+    assert.deepEqual([ev.tipo, ev.origem], [opB.tipo, 'votacao']);
+
+    for (const k of [2, 3, 4]) {
+      await ajudam();
+      if (esp.voto) { S.votarEvento(wa, ana, { i: 0 }); S.votarEvento(wb, beto, { i: 0 }); }
+    }
+    await ajudam(); // fecha a rodada 5: abre o leilão (o canivete é na rodada 6)
+    assert.ok(esp.leilao, 'leilão aberto antes da rodada 6');
+    A.st.saldo = 60; B.st.saldo = 50;
+    B.st.skip = 1; // vai perder a rodada 6, que deve passar sozinha
+    S.darLance(wa, ana, { valor: 40 });
+    S.darLance(wb, beto, { valor: 40 }); // empate: ganha quem tem menos saldo (Beto, 50 BC)
+    await esp.gravando;
+    assert.ok(!esp.leilao, 'todos deram lance: o leilão fecha');
+    assert.equal(A.st.canivete || B.st.canivete, true);
+    const dono = B.st.canivete ? B : A;
+    const [lance] = await rows('SELECT valor_bc, ganhou FROM lances WHERE sala_codigo = $1 AND ganhou', [esp.codigo]);
+    assert.ok(lance, 'o lance vencedor foi gravado');
+    const [mv] = await rows("SELECT tipo, valor_bc FROM movimentos WHERE participacao_id = $1 AND tipo = 'leilao'", [dono.partId]);
+    assert.equal(mv.valor_bc, -lance.valor_bc);
+    assert.equal(esp.rodadaSync, 6);
+    assert.equal(dono, B, 'no empate ganha quem tem menos saldo');
+    assert.equal(B.st.feito, true, 'a rodada perdida de Beto passou sozinha');
+    assert.equal(B.st.stats.perdidas, 1);
+    assert.equal(wa.ultimo('estado').sala.pendentes.includes('Beto'), false);
+    console.log('sala de espera ok');
+  } finally {
+    await pool.query('DELETE FROM salas WHERE codigo = $1', [esp.codigo]);
+  }
   console.log('INTEGRAÇÃO OK');
+} catch (e) {
+  console.error(e);
+  process.exitCode = 1;
 } finally {
   await pool.query('DELETE FROM salas WHERE codigo = $1', [sala.codigo]);
   await pool.query('DELETE FROM jogadores WHERE id = ANY($1)', [[ana.id, beto.id]]);
   await pool.end();
+  process.exit(process.exitCode ?? 0); // os timers das salas manteriam o processo vivo
 }

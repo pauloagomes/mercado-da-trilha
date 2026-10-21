@@ -127,6 +127,9 @@ app.register(async (f) => {
             return;
           }
           case 'reagir': return S.reagir(ws, atual, m);
+          case 'votar_evento': return S.votarEvento(ws, atual, m);
+          case 'dar_lance': return S.darLance(ws, atual, m);
+          case 'abrir_leilao': return S.abrirLeilaoCodigo(ws, atual);
           case 'ping': return ws.send('{"t":"pong"}');
           default:
             if (ACOES_DO_JOGO.includes(m.t)) return await S.agir(ws, atual, m);

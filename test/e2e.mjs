@@ -32,6 +32,13 @@ async function ate(cond, ms = 8000) {
   while (!cond()) { if (Date.now() - t0 > ms) throw new Error('tempo esgotado esperando condição'); await espera(30); }
 }
 
+// Vota e dá lance quando a sala abre a janela entre rodadas.
+function janelas(j) {
+  const s = j.estado?.sala;
+  if (s?.voto && s.voto.meuVoto === null) send(j, { t: 'votar_evento', i: 0 });
+  if (s?.leilao && s.leilao.meuLance === null) send(j, { t: 'dar_lance', valor: 10 });
+}
+
 // Joga a vez atual do jogador de forma simples: compra o que der, responde 0, paga.
 function jogarVez(j) {
   const eu = j.estado?.eu;
@@ -91,6 +98,7 @@ assert.equal(new Set(fichas).size, 2, 'fichas exclusivas na sala de espera');
 let rodadasVistas = new Set();
 for (let i = 0; i < 2000 && c.estado.sala.status !== 'encerrada'; i++) {
   rodadasVistas.add(c.estado.sala.rodadaSync);
+  janelas(c);
   if (c.estado.eu.rodada === c.estado.sala.rodadaSync - 1) jogarVez(c);
   await espera(25);
 }
