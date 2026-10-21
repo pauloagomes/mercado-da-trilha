@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { pool, migrar } from './db.js';
 import * as S from './salas.js';
 import { limparApelido, apelidoProibido } from './apelido.js';
+import * as E from '../public/js/engine.js';
 import { FICHAS, RODADAS_OPCOES, RODADAS_PADRAO, ACOES_DO_JOGO } from '../public/js/engine.js';
 
 const raiz = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,10 +40,14 @@ async function jogadorDoCookie(cookies) {
   return r.rows[0] || null;
 }
 
+const IDS_INSIGNIAS = new Set(E.INSIGNIAS.map((i) => i.id));
+const insigniasDe = async (id) => (await pool.query('SELECT insignia FROM insignias WHERE jogador_id = $1 ORDER BY ganha_em', [id])).rows.map((r) => r.insignia);
+
 app.get('/api/eu', async (req) => {
   const j = await jogadorDoCookie(req.cookies);
   return {
     jogador: j ? { apelido: j.apelido, ficha: j.ficha } : null,
+    insignias: j ? await insigniasDe(j.id) : [],
     config: { rodadas: RODADAS_OPCOES, rodadasPadrao: RODADAS_PADRAO },
   };
 });
@@ -83,6 +88,92 @@ app.get('/r/:slot', async (req, reply) => {
   url.searchParams.set('utm_medium', 'jogo');
   url.searchParams.set('utm_content', slot);
   return reply.redirect(url.toString(), 302);
+});
+
+// ---------- Histórico, jogo sozinho e desafio do dia ----------
+// O dia do desafio é o dia civil de São Paulo (toISOString viraria "amanhã" das 21h à meia-noite).
+const diaSP = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
+const diaAceito = (dia) => typeof dia === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dia) && dia <= diaSP() && dia >= diaSP(new Date(Date.now() - 2 * 86400_000));
+const inteiro = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
+
+// E3: últimas 20 partidas, recorde de cada modo e insígnias.
+app.get('/api/minha-trilha', async (req, reply) => {
+  const j = await jogadorDoCookie(req.cookies);
+  if (!j) return reply.code(401).send({ erro: 'Entre no jogo com um apelido primeiro.' });
+  const partidas = (await pool.query(
+    `SELECT modo, pontos, saldo, quando FROM (
+       SELECT s.tipo AS modo, p.pontos, p.saldo_bc AS saldo, p.atualizado_em AS quando
+         FROM participacoes p JOIN salas s ON s.codigo = p.sala_codigo
+        WHERE p.jogador_id = $1 AND (p.estado->>'fim')::boolean
+       UNION ALL
+       SELECT 'solo', pontos, saldo_bc, criada_em FROM partidas_solo WHERE jogador_id = $1
+       UNION ALL
+       SELECT 'desafio', pontos, saldo_bc, enviado_em FROM desafios_dia WHERE jogador_id = $1
+     ) t ORDER BY quando DESC LIMIT 20`, [j.id])).rows;
+  const rec = (await pool.query(
+    `SELECT modo, max(pontos) AS pontos FROM (
+       SELECT s.tipo AS modo, p.pontos FROM participacoes p JOIN salas s ON s.codigo = p.sala_codigo
+        WHERE p.jogador_id = $1 AND (p.estado->>'fim')::boolean
+       UNION ALL SELECT 'solo', pontos FROM partidas_solo WHERE jogador_id = $1
+       UNION ALL SELECT 'desafio', pontos FROM desafios_dia WHERE jogador_id = $1
+     ) t GROUP BY modo`, [j.id])).rows;
+  const insignias = (await pool.query('SELECT insignia AS id, ganha_em FROM insignias WHERE jogador_id = $1 ORDER BY ganha_em DESC', [j.id])).rows;
+  return { partidas, recordes: Object.fromEntries(rec.map((r) => [r.modo, r.pontos])), insignias };
+});
+
+// O jogo sozinho roda no aparelho; o resultado sobe quando houver conexão. O id vem do aparelho
+// e a gravação ignora repetição, então reenviar é seguro.
+app.post('/api/solo', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+  const j = await jogadorDoCookie(req.cookies);
+  if (!j) return reply.code(401).send({ erro: 'Sem apelido.' });
+  const b = req.body || {};
+  const ok = typeof b.id === 'string' && /^[0-9a-f-]{36}$/i.test(b.id) && inteiro(b.pontos, 0, 1000) && inteiro(b.saldo, 0, E.SALDO_MAX)
+    && inteiro(b.acertos, 0, 60) && inteiro(b.kit, 0, E.ITENS.length) && E.RODADAS_OPCOES.includes(b.rodadas)
+    && (b.posicao == null || inteiro(b.posicao, 1, 4));
+  if (!ok) return reply.code(400).send({ erro: 'Resultado inválido.' });
+  await pool.query(
+    `INSERT INTO partidas_solo (id, jogador_id, pontos, saldo_bc, acertos, kit, rodadas, posicao)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO NOTHING`,
+    [b.id, j.id, b.pontos, b.saldo, b.acertos, b.kit, b.rodadas, b.posicao ?? null]);
+  for (const i of (Array.isArray(b.insignias) ? b.insignias : []).filter((x) => IDS_INSIGNIAS.has(x)).slice(0, 12)) {
+    await pool.query("INSERT INTO insignias (jogador_id, insignia, origem) VALUES ($1, $2, 'solo') ON CONFLICT DO NOTHING", [j.id, i]);
+  }
+  return { ok: true, insignias: await insigniasDe(j.id) };
+});
+
+// E2: a primeira tentativa do dia vale para o placar. O servidor repete a partida com as ações
+// recebidas e só aceita o resultado que ele mesmo calcular.
+app.post('/api/desafio', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+  const j = await jogadorDoCookie(req.cookies);
+  if (!j) return reply.code(401).send({ erro: 'Sem apelido.' });
+  const { dia, acoes } = req.body || {};
+  if (!diaAceito(dia)) return reply.code(400).send({ erro: 'Esse desafio já fechou.' });
+  const r = E.rodarDesafio(dia, acoes);
+  if (r.erro) return reply.code(400).send({ erro: r.erro });
+  const t = r.pontos;
+  const ins = await pool.query(
+    `INSERT INTO desafios_dia (dia, jogador_id, pontos, saldo_bc, acertos, kit) VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (dia, jogador_id) DO NOTHING RETURNING pontos`,
+    [dia, j.id, t.total, r.st.saldo, r.st.acertos, r.st.kit.length]);
+  if (ins.rowCount) {
+    for (const i of E.insigniasDaPartida(r.st)) {
+      await pool.query("INSERT INTO insignias (jogador_id, insignia, origem) VALUES ($1, $2, 'desafio') ON CONFLICT DO NOTHING", [j.id, i]);
+    }
+  }
+  return { valeu: ins.rowCount > 0, pontos: t.total, insignias: await insigniasDe(j.id) };
+});
+
+app.get('/api/desafio/ranking', async (req, reply) => {
+  const dia = req.query?.dia || diaSP();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return reply.code(400).send({ erro: 'Dia inválido.' });
+  const j = await jogadorDoCookie(req.cookies);
+  const top = (await pool.query(
+    `SELECT j.apelido, j.ficha, d.pontos, d.saldo_bc AS saldo, (d.jogador_id = $2) AS eu
+       FROM desafios_dia d JOIN jogadores j ON j.id = d.jogador_id
+      WHERE d.dia = $1 ORDER BY d.pontos DESC, d.saldo_bc DESC, d.enviado_em LIMIT 20`, [dia, j?.id || null])).rows;
+  const total = Number((await pool.query('SELECT count(*) FROM desafios_dia WHERE dia = $1', [dia])).rows[0].count);
+  const meu = j ? (await pool.query('SELECT pontos FROM desafios_dia WHERE dia = $1 AND jogador_id = $2', [dia, j.id])).rows[0] : null;
+  return { dia, hoje: diaSP(), total, top, jogou: !!meu };
 });
 
 app.get('/api/saude', async () => {
@@ -130,6 +221,9 @@ app.register(async (f) => {
           case 'votar_evento': return S.votarEvento(ws, atual, m);
           case 'dar_lance': return S.darLance(ws, atual, m);
           case 'abrir_leilao': return S.abrirLeilaoCodigo(ws, atual);
+          case 'patrulhas': return await S.sortearPatrulhas(ws, atual, m);
+          case 'mestre': return S.mestreDoMercado(ws, atual, m);
+          case 'revanche': return await S.pedirRevanche(ws, atual);
           case 'ping': return ws.send('{"t":"pong"}');
           default:
             if (ACOES_DO_JOGO.includes(m.t)) return await S.agir(ws, atual, m);

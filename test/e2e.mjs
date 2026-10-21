@@ -3,7 +3,9 @@
 //      node test/e2e.mjs                                 (em outro)
 import WebSocket from 'ws';
 import assert from 'node:assert/strict';
+import * as E from '../public/js/engine.js';
 import { ITENS } from '../public/js/engine.js';
+import crypto from 'node:crypto';
 
 const BASE = process.env.BASE || 'http://localhost:3000';
 
@@ -107,6 +109,56 @@ assert.equal(c.estado.eu.rodada, 12);
 assert.equal(d.estado.eu.rodada, 12, 'Duda também completou as 12 rodadas por tempo esgotado');
 assert.ok(rodadasVistas.size >= 12);
 console.log('sala de espera ok:', c.estado.mural.at(-1).texto);
+
+// ---------- Etapa 3: jogo sozinho, desafio do dia e Minha trilha ----------
+const http = (j, caminho, corpo) => fetch(`${BASE}${caminho}`, {
+  method: corpo ? 'POST' : 'GET', headers: { 'content-type': 'application/json', cookie: j.cookie }, body: corpo ? JSON.stringify(corpo) : undefined,
+});
+const hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+
+const idSolo = crypto.randomUUID();
+const solo = { id: idSolo, pontos: 88, saldo: 70, acertos: 4, kit: 5, rodadas: 12, posicao: 2, insignias: ['poupador', 'inventada'] };
+let r1 = await http(a, '/api/solo', solo);
+assert.equal(r1.status, 200);
+const insSolo = (await r1.json()).insignias;
+assert.ok(insSolo.includes('poupador') && !insSolo.includes('inventada'), 'insígnia desconhecida é ignorada');
+assert.equal((await http(a, '/api/solo', solo)).status, 200, 'reenviar o mesmo resultado é seguro');
+assert.equal((await http(a, '/api/solo', { ...solo, id: crypto.randomUUID(), pontos: 5000 })).status, 400);
+assert.equal((await http({ cookie: '' }, '/api/solo', solo)).status, 401);
+
+// joga o desafio de hoje como o celular faria e manda as ações
+const ctx = E.novoDesafio(hoje), eu = ctx.estados.get('eu'), acoes = [];
+const passo = (m) => { assert.ok(E.passoDoDesafio(ctx, m).ok, JSON.stringify(m)); acoes.push(m); };
+for (let i = 0; i < 300 && !eu.fim; i++) {
+  if (!eu.rolou) passo({ t: 'rolar' });
+  else if (eu.pend?.tipo === 'loja') { const it = ITENS.find((x) => x.loja === eu.pend.loja && !eu.kit.includes(x.id) && E.precoItem(eu, x) + eu.extra <= eu.saldo); passo(it ? { t: 'comprar', itens: [it.id] } : { t: 'sair_loja' }); }
+  else if (eu.pend?.tipo === 'carta') passo({ t: 'responder', i: 0 });
+  else if (eu.pend?.tipo === 'perdido') passo({ t: 'arriscar' });
+  else passo({ t: 'pagar' });
+}
+const esperado = E.pontuacao(eu).total;
+const d1 = await http(a, '/api/desafio', { dia: hoje, acoes });
+assert.equal(d1.status, 200, await d1.clone().text());
+const dj = await d1.json();
+assert.deepEqual([dj.valeu, dj.pontos], [true, esperado], 'o servidor repete a partida e chega aos mesmos pontos');
+const d2 = await (await http(a, '/api/desafio', { dia: hoje, acoes })).json();
+assert.equal(d2.valeu, false, 'só a primeira tentativa do dia vale');
+assert.equal((await http(b, '/api/desafio', { dia: hoje, acoes: acoes.slice(0, 5) })).status, 400, 'partida incompleta');
+assert.equal((await http(b, '/api/desafio', { dia: '2099-01-01', acoes })).status, 400, 'dia no futuro');
+assert.equal((await http(b, '/api/desafio', { dia: '2020-01-01', acoes })).status, 400, 'dia que já fechou');
+assert.equal((await http(b, '/api/desafio', { dia: hoje, acoes: [{ t: 'comprar', itens: ['lona'] }] })).status, 400);
+const rk = await (await http(a, `/api/desafio/ranking?dia=${hoje}`)).json();
+assert.ok(rk.total >= 1 && rk.top.some((x) => x.eu && x.pontos === esperado), 'a primeira tentativa entra no placar do dia');
+assert.equal(rk.jogou, true);
+assert.equal((await (await http(b, `/api/desafio/ranking?dia=${hoje}`)).json()).jogou, false);
+
+const trilha = await (await http(a, '/api/minha-trilha')).json();
+assert.ok(trilha.partidas.some((p) => p.modo === 'solo' && p.pontos === 88));
+assert.ok(trilha.partidas.some((p) => p.modo === 'desafio' && p.pontos === esperado));
+assert.equal(trilha.recordes.solo, 88);
+assert.ok(trilha.insignias.some((i) => i.id === 'poupador'));
+assert.ok((await (await http(a, '/api/eu')).json()).insignias.includes('poupador'), '/api/eu traz as insígnias');
+console.log('jogo sozinho, desafio do dia e Minha trilha ok');
 
 // Link do Trilha HUB
 const red = await fetch(`${BASE}/r/resultado`, { redirect: 'manual' });

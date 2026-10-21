@@ -45,6 +45,11 @@ class Sala {
     this.voto = null;
     this.leilao = null;
     this.leilaoFeito = false;
+    this.patrulhasN = 0;           // A4: quantas patrulhas o anfitrião sorteou (0 = sem patrulhas)
+    this.mestreEm = 0;
+    this.revanche = null;          // E4: janela de 20 s da sala de espera
+    this.revancheCodigo = null;    // E4: código da sala nova, quando o anfitrião reabre
+    this.revancheFeita = false;
     this.rodadaSync = r.rodada_sync || 1;
     this.jogadores = new Map();  // jogadorId -> { partId, ordem, cor, st, ultimaReacao }
     this.sockets = new Set();    // conexões abertas nesta sala (jogadores e espectadores)
@@ -88,7 +93,13 @@ async function adicionarJogador(sala, jog) {
      ON CONFLICT (sala_codigo, jogador_id) DO UPDATE SET atualizado_em = now() RETURNING id`,
     [sala.codigo, jog.id, ordem, cor, st.saldo, E.visaoPropria(st), st.meta],
   );
-  const p = { partId: r.rows[0].id, ordem, cor, st, ultimaReacao: 0, limite: 0, estendido: false };
+  const p = { partId: r.rows[0].id, ordem, cor, st, ultimaReacao: 0, limite: 0, estendido: false, patrulha: null };
+  if (sala.patrulhasN) {
+    // quem chega com as patrulhas já sorteadas entra na que tem menos gente
+    const conta = Array.from({ length: sala.patrulhasN }, (_, i) => [...sala.jogadores.values()].filter((x) => x.patrulha === i).length);
+    p.patrulha = conta.indexOf(Math.min(...conta));
+    pool.query('UPDATE participacoes SET patrulha = $2 WHERE id = $1', [p.partId, p.patrulha]).catch(() => {});
+  }
   sala.jogadores.set(jog.id, p);
   return p;
 }
@@ -149,7 +160,8 @@ export async function carregarSala(codigo) {
   const ps = await pool.query('SELECT * FROM participacoes WHERE sala_codigo = $1 ORDER BY ordem', [codigo]);
   for (const row of ps.rows) {
     const st = { ...row.estado, saida: [], cena: [] };
-    sala.jogadores.set(row.jogador_id, { partId: row.id, ordem: row.ordem, cor: row.cor, st, ultimaReacao: 0, limite: 0, estendido: false });
+    sala.jogadores.set(row.jogador_id, { partId: row.id, ordem: row.ordem, cor: row.cor, st, ultimaReacao: 0, limite: 0, estendido: false, patrulha: row.patrulha });
+    if (row.patrulha != null) sala.patrulhasN = Math.max(sala.patrulhasN, row.patrulha + 1);
   }
   if (salas.has(codigo)) return salas.get(codigo); // outra requisição carregou junto
   salas.set(codigo, sala);
@@ -157,12 +169,45 @@ export async function carregarSala(codigo) {
   return sala;
 }
 
+// E1: confere as insígnias de quem terminou. A de "Campeão da mesa" só sai quando todos terminaram.
+function conferirInsignias(sala) {
+  const lista = [...sala.jogadores.entries()];
+  const todosFim = lista.length > 0 && lista.every(([, p]) => p.st.fim);
+  const ranking = todosFim ? placar(sala, null).map((x) => x.ordem) : [];
+  const origem = 'sala';
+  for (const [id, p] of lista) {
+    if (!p.st.fim) continue;
+    const pos = todosFim ? ranking.indexOf(p.ordem) + 1 : 0;
+    const ids = E.insigniasDaPartida(p.st, { pos, total: todosFim ? lista.length : 1 });
+    p.st.insignias ||= [];
+    const novas = ids.filter((i) => !p.st.insignias.includes(i));
+    if (!novas.length) continue;
+    p.st.insignias.push(...novas);
+    for (const insignia of novas) {
+      pool.query('INSERT INTO insignias (jogador_id, insignia, origem) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [id, insignia, origem]).catch(() => {});
+    }
+    gravar(sala, id);
+  }
+}
+
 // ---------- Visões enviadas aos celulares ----------
 function placar(sala, paraId) {
   return [...sala.jogadores.entries()]
-    .map(([id, p]) => ({ ...E.resumoPublico(p.st), cor: p.cor, ordem: p.ordem, eu: id === paraId,
+    .map(([id, p]) => ({ ...E.resumoPublico(p.st), cor: p.cor, ordem: p.ordem, eu: id === paraId, patrulha: p.patrulha,
+      insignias: p.st.insignias || [],
       feito: sala.tipo === 'espera' ? (p.st.feito || p.st.rodada >= sala.rodadaSync) : false }))
     .sort(E.compararPlacar);
+}
+
+// A4: média de pontos por patrulha, para a patrulha maior não ser favorecida.
+const NOMES_PATRULHA = ['Lobos', 'Corujas', 'Raposas', 'Águias', 'Onças', 'Tucanos'];
+function patrulhasPublicas(sala) {
+  if (!sala.patrulhasN) return null;
+  return Array.from({ length: sala.patrulhasN }, (_, i) => {
+    const m = [...sala.jogadores.values()].filter((p) => p.patrulha === i);
+    const pts = m.reduce((s, p) => s + E.pontuacao(p.st).total, 0);
+    return { n: i, nome: NOMES_PATRULHA[i], membros: m.length, media: m.length ? Math.round((pts / m.length) * 10) / 10 : 0 };
+  }).sort((a, b) => b.media - a.media);
 }
 
 function infoSala(sala, paraId) {
@@ -183,6 +228,10 @@ function infoSala(sala, paraId) {
       fimEm: sala.leilao.fim, deram: sala.leilao.lances.size, meuLance: sala.leilao.lances.get(paraId) ?? null,
       pts: E.CANIVETE_PTS, lances: E.LANCES,
     } : null,
+    patrulhas: patrulhasPublicas(sala),
+    revanche: sala.revanche ? { fimEm: sala.revanche.fim, aceitaram: sala.revanche.aceitos.size, euAceitei: sala.revanche.aceitos.has(paraId) } : null,
+    revancheCodigo: sala.revancheCodigo,
+    podeMestre: sala.tipo === 'codigo' && sala.status === 'aberta' && sala.anfitriao === paraId,
     podeLeilao: sala.tipo === 'codigo' && sala.status === 'aberta' && !sala.leilaoFeito && sala.anfitriao === paraId,
     jogando: lista.filter((p) => !p.st.fim).length,
     terminaram: lista.filter((p) => p.st.fim).length,
@@ -275,6 +324,7 @@ export async function encerrarSala(sala, motivo) {
     if (!p.st.fim) { p.st.fim = true; p.st.avisos.push({ tipo: 'info', texto: 'Fim do mercado! A conta foi congelada.' }); gravar(sala, id); }
   }
   anotarMural(sala, motivo, '#4F6D7A');
+  conferirInsignias(sala);
   await pool.query("UPDATE salas SET status = 'encerrada', encerrada_em = now() WHERE codigo = $1", [sala.codigo]).catch(() => {});
   transmitir(sala);
 }
@@ -330,7 +380,7 @@ export async function agir(ws, jog, msg) {
   if (sala.tipo === 'codigo' && st.feito) {
     E.fecharRodada(st);
     E.passarRodadasPerdidas(st);
-    if (st.fim) anotarMural(sala, `${st.apelido} terminou com ${E.pontuacao(st).total} pts.`, p.cor);
+    if (st.fim) { anotarMural(sala, `${st.apelido} terminou com ${E.pontuacao(st).total} pts.`, p.cor); conferirInsignias(sala); }
   }
   // C6: quem cai numa loja ou carta ganha mais um tempo para decidir.
   if (sala.tipo === 'espera' && st.pend && !p.estendido && ['loja', 'carta', 'dado'].includes(st.pend.tipo)) {
@@ -579,6 +629,12 @@ async function iniciarPartidaDaFila() {
   const escolhidos = [...fila.values()].sort((a, b) => a.desde - b.desde).slice(0, MAX_ESPERA);
   if (escolhidos.length < 2) { recalcularFila(); return; }
   for (const f of escolhidos) { fila.delete(f.id); f.ws.naFila = false; }
+  await abrirPartidaEspera(escolhidos, `Partida da sala de espera com ${escolhidos.length} jogadores. Rodada 1 aberta!`);
+  recalcularFila();
+}
+
+// Cria a partida da sala de espera para estes jogadores (vindos da fila ou de uma revanche).
+async function abrirPartidaEspera(escolhidos, aviso) {
   try {
     const row = await inserirSala('espera', RODADAS_ESPERA, null);
     const sala = new Sala(row);
@@ -591,18 +647,101 @@ async function iniciarPartidaDaFila() {
       usadas.add(ficha);
       const p = await adicionarJogador(sala, { id: f.id, apelido: f.apelido, ficha });
       if (ficha !== f.ficha) p.st.avisos.push({ tipo: 'info', texto: 'Sua ficha já tinha sido escolhida por outro jogador, então você ganhou outra nesta partida.' });
+      sairDaSalaAtual(f.ws);
       f.ws.salaCodigo = sala.codigo;
       sala.sockets.add(f.ws);
-      enviar(f.ws, { t: 'partida', codigo: sala.codigo, tipo: 'espera' });
+      enviar(f.ws, { t: 'partida', codigo: sala.codigo, tipo: 'espera', nova: true });
     }
-    anotarMural(sala, `Partida da sala de espera com ${escolhidos.length} jogadores. Rodada 1 aberta!`, CORES[0]);
+    anotarMural(sala, aviso, CORES[0]);
     abrirRodadaSync(sala);
     transmitir(sala);
   } catch (e) {
     log.error?.({ err: e }, 'falha ao iniciar partida da fila');
-    for (const f of escolhidos) enviar(f.ws, { t: 'erro', msg: 'Não foi possível começar a partida. Entre na fila de novo.' });
+    for (const f of escolhidos) enviar(f.ws, { t: 'erro', msg: 'Não foi possível começar a partida. Tente de novo.' });
   }
-  recalcularFila();
+}
+
+// ---------- Patrulhas (A4), Mestre do mercado (C7) e revanche (E4) ----------
+const anfitriaoDe = (ws, jog) => {
+  const sala = ws.salaCodigo && salas.get(ws.salaCodigo);
+  return sala && sala.tipo === 'codigo' && sala.anfitriao === jog.id ? sala : null;
+};
+
+// O anfitrião escolhe quantas patrulhas (2 a 6) e o sistema sorteia quem fica em cada uma.
+export async function sortearPatrulhas(ws, jog, msg) {
+  const sala = anfitriaoDe(ws, jog);
+  if (!sala || sala.status !== 'aberta') return;
+  const n = Number(msg.n);
+  if (!Number.isInteger(n) || n < 2 || n > 6) return enviar(ws, { t: 'erro', msg: 'Escolha de 2 a 6 patrulhas.' });
+  const ids = [...sala.jogadores.keys()];
+  if (ids.length < n) return enviar(ws, { t: 'erro', msg: `Para ${n} patrulhas a sala precisa de pelo menos ${n} jogadores.` });
+  for (let i = ids.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+  ids.forEach((id, i) => { sala.jogadores.get(id).patrulha = i % n; });
+  sala.patrulhasN = n;
+  await pool.query(
+    'UPDATE participacoes SET patrulha = x.pat FROM (SELECT unnest($1::bigint[]) AS id, unnest($2::smallint[]) AS pat) x WHERE participacoes.id = x.id',
+    [ids.map((id) => sala.jogadores.get(id).partId), ids.map((id) => sala.jogadores.get(id).patrulha)],
+  ).catch((e) => log.error?.({ err: e }, 'falha ao gravar patrulhas'));
+  anotarMural(sala, `O anfitrião sorteou ${n} patrulhas.`, CORES[0]);
+  tocarAtividade(sala);
+  transmitir(sala);
+}
+
+// O anfitrião chama um evento para a sala toda na hora, na rodada em que cada um estiver.
+export function mestreDoMercado(ws, jog, msg) {
+  const sala = anfitriaoDe(ws, jog);
+  if (!sala || sala.status !== 'aberta') return;
+  if (!E.MESTRE_EVENTOS.includes(msg.tipo)) return enviar(ws, { t: 'erro', msg: 'Evento desconhecido.' });
+  if (Date.now() - sala.mestreEm < 15_000) return enviar(ws, { t: 'erro', msg: 'Espere alguns segundos entre um evento e outro.' });
+  sala.mestreEm = Date.now();
+  const loja = E.EVENTOS[msg.tipo].loja ? E.LOJAS[crypto.randomInt(E.LOJAS.length)] : null;
+  const tocados = [];
+  for (const [id, p] of sala.jogadores) if (E.aplicarEventoAgora(p.st, msg.tipo, loja)) tocados.push(id);
+  anotarMural(sala, `O anfitrião chamou: ${E.descreverEvento({ tipo: msg.tipo, loja })}.`, CORES[0]);
+  gravar(sala, ...tocados, ...recolherCenas(sala));
+  transmitir(sala);
+}
+
+// Na sala de espera, quem aceitar a revanche em 20 s joga de novo junto. Na sala com código, o
+// anfitrião reabre e todos são levados para a sala nova.
+export async function pedirRevanche(ws, jog) {
+  const sala = ws.salaCodigo && salas.get(ws.salaCodigo);
+  const p = sala?.jogadores.get(jog.id);
+  if (!p || sala.status !== 'encerrada') return;
+  if (sala.tipo === 'codigo') {
+    if (sala.anfitriao !== jog.id) return enviar(ws, { t: 'erro', msg: 'Só o anfitrião reabre a sala.' });
+    if (sala.revancheCodigo) return;
+    const nova = await criarSalaCodigo({ id: jog.id, apelido: jog.apelido, ficha: jog.ficha }, sala.rodadas);
+    sala.revancheCodigo = nova.codigo;
+    for (const s of [...sala.sockets]) {
+      if (s === ws) { await entrarNaSala(ws, jog, nova.codigo); continue; }
+      enviar(s, { t: 'revanche_sala', codigo: nova.codigo, de: jog.apelido });
+    }
+    transmitir(sala);
+    return;
+  }
+  if (sala.revancheFeita) return enviar(ws, { t: 'erro', msg: 'A revanche desta partida já começou. Entre na fila de novo.' });
+  sala.revanche ||= { fim: Date.now() + 20_000, aceitos: new Map() };
+  if (!sala.revanche.timer) sala.revanche.timer = setTimeout(() => fecharRevanche(sala), 20_000);
+  sala.revanche.aceitos.set(jog.id, ws);
+  const conectados = [...sala.jogadores.keys()].filter((id) => [...sala.sockets].some((s) => s.jogadorId === id && s.readyState === 1));
+  if (conectados.every((id) => sala.revanche.aceitos.has(id))) fecharRevanche(sala); else transmitir(sala);
+}
+
+async function fecharRevanche(sala) {
+  const r = sala.revanche; if (!r) return;
+  clearTimeout(r.timer); sala.revanche = null; sala.revancheFeita = true;
+  const escolhidos = [...r.aceitos].filter(([, w]) => w.readyState === 1).map(([id, w]) => {
+    const p = sala.jogadores.get(id);
+    return { id, apelido: p.st.apelido, ficha: p.st.ficha, ws: w };
+  }).slice(0, MAX_ESPERA);
+  if (escolhidos.length < 2) {
+    sala.revancheFeita = false;
+    for (const f of escolhidos) enviar(f.ws, { t: 'erro', msg: 'A revanche precisa de pelo menos 2 jogadores.' });
+    transmitir(sala);
+    return;
+  }
+  await abrirPartidaEspera(escolhidos, `Revanche com ${escolhidos.length} jogadores. Rodada 1 aberta!`);
 }
 
 export function desconectar(ws, jog) {

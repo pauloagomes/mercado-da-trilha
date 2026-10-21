@@ -163,6 +163,97 @@ try {
   } finally {
     await pool.query('DELETE FROM salas WHERE codigo = $1', [esp.codigo]);
   }
+  // ---- Etapa 3: patrulhas, Mestre do mercado, insígnias e revanche
+  const cris = await novoJogador('Cris');
+  const ate3 = async (c, ms = 3000) => { const t0 = Date.now(); while (!c()) { if (Date.now() - t0 > ms) throw new Error('tempo esgotado'); await new Promise((r) => setTimeout(r, 20)); } };
+  const criadas = [];
+  try {
+    const w3 = [falso(ana), falso(beto), falso(cris)];
+    const s3 = await S.criarSalaCodigo(ana, 8); criadas.push(s3.codigo);
+    for (const [w, j] of [[w3[0], ana], [w3[1], beto], [w3[2], cris]]) await S.entrarNaSala(w, j, s3.codigo);
+    const [P1, P2, P3] = [ana, beto, cris].map((j) => s3.jogadores.get(j.id));
+
+    await S.sortearPatrulhas(w3[1], beto, { n: 2 });
+    assert.equal(s3.patrulhasN, 0, 'só o anfitrião sorteia');
+    await S.sortearPatrulhas(w3[0], ana, { n: 4 });
+    assert.match(w3[0].ultimo('erro').msg, /pelo menos 4/);
+    await S.sortearPatrulhas(w3[0], ana, { n: 2 });
+    const pats = [P1, P2, P3].map((p) => p.patrulha).sort();
+    assert.deepEqual(pats, [0, 0, 1].sort().length === 3 ? pats : [], 'cada jogador cai numa patrulha');
+    assert.ok(pats.every((x) => x === 0 || x === 1) && new Set(pats).size === 2);
+    const est = w3[0].ultimo('estado');
+    assert.equal(est.sala.patrulhas.length, 2);
+    assert.equal(est.sala.patrulhas.reduce((a, b) => a + b.membros, 0), 3);
+    assert.ok(est.placar.every((x) => x.patrulha === 0 || x.patrulha === 1));
+    const dbPat = await rows('SELECT patrulha FROM participacoes WHERE sala_codigo = $1 ORDER BY ordem', [s3.codigo]);
+    assert.deepEqual(dbPat.map((r) => r.patrulha), [P1, P2, P3].map((p) => p.patrulha), 'as patrulhas ficam gravadas');
+
+    // Mestre do mercado: Visita dos pais na sala toda
+    S.mestreDoMercado(w3[1], beto, { tipo: 'visita' });
+    assert.equal(P1.st.saldo, 100, 'só o anfitrião chama o Mestre');
+    S.mestreDoMercado(w3[0], ana, { tipo: 'mutirao' });
+    assert.match(w3[0].ultimo('erro').msg, /desconhecido/);
+    S.mestreDoMercado(w3[0], ana, { tipo: 'visita' });
+    await s3.gravando;
+    assert.deepEqual([P1, P2, P3].map((p) => p.st.saldo), [130, 130, 130]);
+    assert.ok(s3.mural.some((m) => /anfitrião chamou: Visita dos pais/.test(m.texto)));
+    S.mestreDoMercado(w3[0], ana, { tipo: 'chuva' });
+    assert.match(w3[0].ultimo('erro').msg, /Espere/);
+    await S.encerrarSala(s3, 'fim de teste');
+
+    // Insígnias e revanche da sala com código
+    const wa4 = falso(ana), wb4 = falso(beto);
+    const s4 = await S.criarSalaCodigo(ana, 8); criadas.push(s4.codigo);
+    await S.entrarNaSala(wa4, ana, s4.codigo); await S.entrarNaSala(wb4, beto, s4.codigo);
+    for (let i = 0; i < 8; i++) { await S.agir(wa4, ana, { t: 'ajudar' }); await S.agir(wb4, beto, { t: 'ajudar' }); }
+    await s4.gravando;
+    const A4 = s4.jogadores.get(ana.id), B4 = s4.jogadores.get(beto.id);
+    assert.ok(A4.st.fim && B4.st.fim);
+    const insA = (await rows('SELECT insignia FROM insignias WHERE jogador_id = $1', [ana.id])).map((r) => r.insignia);
+    const insB = (await rows('SELECT insignia FROM insignias WHERE jogador_id = $1', [beto.id])).map((r) => r.insignia);
+    for (const ins of [insA, insB]) assert.ok(ins.includes('cofre') && ins.includes('semrecusa'), `insígnias: ${ins}`);
+    assert.equal([A4, B4].filter((p) => p.st.insignias.includes('campeao')).length, 1, 'um só campeão da mesa');
+    assert.ok(wa4.ultimo('estado').eu.insignias.includes('cofre'), 'o jogador recebe as insígnias na partida');
+    assert.ok(Array.isArray(wa4.ultimo('estado').placar[0].insignias));
+
+    await S.pedirRevanche(wb4, beto); // ainda não terminou: a sala com código só encerra pelo anfitrião
+    assert.equal(s4.revancheCodigo, null);
+    await S.encerrarSala(s4, 'fim');
+    await S.pedirRevanche(wb4, beto);
+    assert.match(wb4.ultimo('erro').msg, /anfitrião/);
+    await S.pedirRevanche(wa4, ana);
+    assert.ok(s4.revancheCodigo && s4.revancheCodigo !== s4.codigo);
+    criadas.push(s4.revancheCodigo);
+    assert.equal(wb4.ultimo('revanche_sala').codigo, s4.revancheCodigo, 'os outros são levados para a sala nova');
+    assert.equal(wa4.salaCodigo, s4.revancheCodigo, 'o anfitrião já está na sala nova');
+    assert.equal(S._interno.salas.get(s4.revancheCodigo).anfitriao, ana.id);
+    console.log('sala com código (etapa 3) ok');
+
+    // Revanche da sala de espera: quem aceitar joga de novo
+    const wa5 = falso(ana), wb5 = falso(beto), wc5 = falso(cris);
+    S.entrarNaFila(wa5, ana); S.entrarNaFila(wb5, beto); S.entrarNaFila(wc5, cris);
+    await ate3(() => wa5.ultimo('partida') && wb5.ultimo('partida') && wc5.ultimo('partida'));
+    const e5 = S._interno.salas.get(wa5.ultimo('partida').codigo); criadas.push(e5.codigo);
+    await S.pedirRevanche(wa5, ana);
+    assert.equal(e5.revanche, null, 'só depois que a partida acaba');
+    await S.encerrarSala(e5, 'fim');
+    await S.pedirRevanche(wa5, ana);
+    assert.equal(wa5.ultimo('estado').sala.revanche.aceitaram, 1);
+    await S.pedirRevanche(wb5, beto);
+    assert.equal(e5.revanche.aceitos.size, 2);
+    wc5.readyState = 3; // Cris saiu: a revanche não espera por quem não está mais lá
+    await S.pedirRevanche(wb5, beto);
+    await ate3(() => wa5.msgs.filter((m) => m.t === 'partida').length >= 2);
+    const nova = S._interno.salas.get(wa5.ultimo('partida').codigo); criadas.push(nova.codigo);
+    assert.notEqual(nova.codigo, e5.codigo);
+    assert.equal(nova.jogadores.size, 2);
+    assert.equal(nova.tipo, 'espera');
+    assert.deepEqual([...nova.jogadores.values()].map((p) => p.st.rodada), [0, 0]);
+    console.log('revanche ok');
+  } finally {
+    for (const c of criadas) await pool.query('DELETE FROM salas WHERE codigo = $1', [c]);
+    await pool.query('DELETE FROM jogadores WHERE id = $1', [cris.id]);
+  }
   console.log('INTEGRAÇÃO OK');
 } catch (e) {
   console.error(e);
