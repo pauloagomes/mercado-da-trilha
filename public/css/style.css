@@ -233,3 +233,33 @@ details summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
 .meta-card { display: grid; gap: 2px; border: 1px dashed var(--line); border-radius: 12px; padding: 8px 12px; background: color-mix(in srgb, var(--sun) 9%, var(--panel)); }
 .metas-sala { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; font-size: .92rem; }
 .btn-som { display: inline-flex; gap: 6px; align-items: center; }
+
+/* Etapa 2: avisos, janela de votação e leilão, placar, noite e comemorações */
+.banner-jogo { position: fixed; left: 50%; top: 22%; transform: translate(-50%, -50%); z-index: 31; max-width: calc(100% - 32px); text-align: center; font-family: var(--display); font-size: clamp(1.15rem, 4.5vw, 1.9rem); color: #FFF4D6; background: color-mix(in srgb, var(--hero) 88%, transparent); border: 2px solid var(--sun); border-radius: 16px; padding: 10px 20px; pointer-events: none; animation: banner 2.6s ease-out forwards; }
+.banner-jogo.virada { border-color: var(--c-agencia); }
+.banner-jogo.noite { border-color: var(--c-tempestade); background: color-mix(in srgb, #0A0F1E 90%, transparent); }
+@keyframes banner { 0% { opacity: 0; transform: translate(-50%, -30%) scale(.9); } 12%, 80% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -60%); } }
+.notif { position: fixed; left: 50%; top: calc(10px + env(safe-area-inset-top, 0px)); transform: translate(-50%, 0); z-index: 45; width: min(380px, calc(100% - 24px)); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-left: 5px solid var(--c-agencia); border-radius: 14px; padding: 10px 14px; box-shadow: 0 6px 22px rgba(0, 0, 0, .35); font-size: .92rem; display: grid; gap: 3px; pointer-events: none; }
+.notif-topo { display: flex; justify-content: space-between; font-size: .74rem; color: var(--muted); }
+.notif-topo b { color: var(--c-agencia); letter-spacing: .04em; }
+.confete { position: fixed; left: 0; top: 0; width: 9px; height: 14px; border-radius: 2px; z-index: 32; pointer-events: none; will-change: transform; }
+
+.janela .opcao.escolhida { border-color: var(--sun); background: color-mix(in srgb, var(--sun) 16%, var(--panel)); }
+.lances { display: flex; flex-wrap: wrap; gap: 8px; }
+.pend-top { flex-basis: 100%; font-size: .8rem; color: var(--hero-muted); min-height: 1.2em; }
+.pl .pos { position: relative; }
+.seta { display: block; font-size: .6rem; line-height: 1; }
+.seta.up { color: var(--good); }
+.seta.down { color: var(--bad); }
+.pl .pts { position: relative; }
+.delta { position: absolute; right: 0; top: -.9em; font-size: .78rem; font-weight: 800; color: var(--good); animation: flutua-delta 2.4s ease-out forwards; }
+@keyframes flutua-delta { 0% { opacity: 0; transform: translateY(6px); } 15% { opacity: 1; } 100% { opacity: 0; transform: translateY(-10px); } }
+
+/* Tabuleiro vivo (D7): noite, loja fechada de luz apagada e feira com bandeirinhas */
+.board::after { content: ""; position: absolute; inset: 0; border-radius: 16px; background: #060A1C; opacity: 0; pointer-events: none; transition: opacity 1.2s ease; z-index: 1; }
+.board.noite::after { opacity: .5; }
+.cell.fechada::after { content: ""; position: absolute; inset: 0; background: #0B0F0C; opacity: .55; }
+.cell.feira::before { background: repeating-linear-gradient(90deg, var(--c-partida) 0 8px, var(--c-enf) 8px 16px, var(--c-bussola) 16px 24px); }
+.okmsg.brilho { position: relative; animation: brilho 1.4s ease-out; }
+@keyframes brilho { 0% { transform: scale(.97); opacity: .4; } 40% { transform: scale(1.02); opacity: 1; } 100% { transform: scale(1); } }
+.board.noite .peoes-camada, .board.noite .centro { z-index: 2; }

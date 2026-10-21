@@ -21,6 +21,9 @@ const ls = {
 };
 
 const DICAS = [
+  'Cada item do kit protege de um revés: Lona da chuva, Corda da ponte, Lanterna do Perdido, Kit primeiros socorros do curativo.',
+  'A Bússola dá um dado duplo de graça.',
+  'Nas últimas rodadas é noite no acampamento: créditos e cartas certas valem em dobro.',
   'Passou pela Partida? Mais 30 BC de mesada na conta.',
   'Na Agência BadenCoin você recebe 40 BC, mas a conta nunca passa de 300 BC.',
   'Confira o aviso de gasto depois de cada compra: é assim que se pega um valor errado.',
@@ -45,6 +48,7 @@ const S = {
   cenasN: null,          // última cena já mostrada (null = ainda não sei, não anime o passado)
   soloN: 0, peaoPos: {}, // peaoPos: ordem -> casa onde o peão está desenhado
   som: ls.get('mt-som', true), reacaoLivreEm: 0,
+  setas: {}, delta: {},  // C5: quem subiu ou desceu no placar e os pontos ganhos na última jogada
 };
 
 // ---------- Utilidades de tela ----------
@@ -222,6 +226,7 @@ async function aplicar(m, animar) {
     for (const c of novas) for (const ev of c.cena) if (ev.t === 'sala' && c.ordem === minhaOrdem(m)) toast(`${ev.de} tirou "${ev.carta}"`);
   }
   const antes = S.eu;
+  atualizarRanking(m.placar);
   S.sala = m.sala; S.eu = m.eu; S.placar = m.placar; S.mural = m.mural; S.pontes = m.pontes || {};
   if (m.sala) S.offset = m.sala.agora - Date.now();
   if (m.eu && antes && antes.pend?.tipo === 'loja' && !m.eu.pend) S.carrinho = {};
@@ -230,6 +235,59 @@ async function aplicar(m, animar) {
   if (S.modo === 'solo' && m.eu?.fim && S.tela === 'jogo') setTimeout(() => ir('resultado'), 900);
   S.erro = ''; S.aguardando = false;
   render();
+}
+
+// C5: setas de subida e descida, "+N pts" da última jogada e aviso de "Virada!" quando o líder muda.
+function atualizarRanking(novo) {
+  const ant = S.placar;
+  if (S.modo !== 'sala' || !ant.length || ant.length !== novo.length) { S.setas = {}; S.delta = {}; return; }
+  const rank = (l) => Object.fromEntries(l.map((p, i) => [p.ordem, i]));
+  const ra = rank(ant), rn = rank(novo);
+  let mexeu = false;
+  for (const p of novo) {
+    if (ra[p.ordem] != null && rn[p.ordem] !== ra[p.ordem]) S.setas[p.ordem] = rn[p.ordem] < ra[p.ordem] ? 'up' : 'down';
+    const antes = ant.find((x) => x.ordem === p.ordem);
+    if (antes && p.pontos > antes.pontos) { S.delta[p.ordem] = { v: p.pontos - antes.pontos, ate: Date.now() + 2600 }; mexeu = true; }
+  }
+  if (ant[0].ordem !== novo[0].ordem && ant[0].pontos > 0) {
+    banner(`Virada! ${novo[0].apelido} assumiu a liderança`, 'virada'); som('certa');
+  }
+  if (mexeu) setTimeout(atualizarPlacar, 2700);
+}
+function atualizarPlacar() { const el = $('#placar'); if (el) el.innerHTML = placarHtml(); }
+
+// ---------- Avisos na tela ----------
+function banner(texto, cls = '') {
+  const el = document.createElement('div');
+  el.className = `banner-jogo ${cls}`; el.textContent = texto;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+// D4: o aviso de gasto desce do topo no formato da mensagem do Trilha HUB.
+function notificar(texto) {
+  const el = document.createElement('div');
+  el.className = 'notif'; el.setAttribute('role', 'status');
+  el.innerHTML = `<div class="notif-topo"><b>Trilha HUB</b><span>agora</span></div><div>${esc(texto)}</div>`;
+  document.body.appendChild(el);
+  if (reduzir) { setTimeout(() => el.remove(), 3000); return; }
+  const a = el.animate([{ transform: 'translate(-50%, -120%)', opacity: 0 }, { transform: 'translate(-50%, 0)', opacity: 1, offset: 0.12 },
+    { transform: 'translate(-50%, 0)', opacity: 1, offset: 0.85 }, { transform: 'translate(-50%, -120%)', opacity: 0 }], { duration: 3200 });
+  a.finished.then(() => el.remove()).catch(() => el.remove());
+}
+// D6: confete para o kit completo e para o Canivete.
+function confete() {
+  if (reduzir) return;
+  const cores = ['#E3A21A', '#2F7A42', '#C2415D', '#2B6FA3', '#7A4FB0', '#D2541B'];
+  for (let i = 0; i < 40; i++) {
+    const el = document.createElement('i');
+    el.className = 'confete'; el.style.background = cores[i % cores.length];
+    document.body.appendChild(el);
+    const x = Math.random() * innerWidth, dx = (Math.random() - 0.5) * 240, giro = Math.random() * 720 - 360;
+    const a = el.animate([{ transform: `translate(${x}px, -20px) rotate(0deg)`, opacity: 1 },
+      { transform: `translate(${x + dx}px, ${innerHeight + 20}px) rotate(${giro}deg)`, opacity: 0.9 }],
+      { duration: 1400 + Math.random() * 900, delay: Math.random() * 300, easing: 'cubic-bezier(.2,.6,.4,1)', fill: 'backwards' });
+    a.finished.then(() => el.remove()).catch(() => el.remove());
+  }
 }
 
 // ---------- Cenas: o que aconteceu em cada jogada ----------
@@ -381,6 +439,7 @@ const CENAS = {
   async gasto(ev, ordem, meu) {
     if (!meu) return;
     som('gasto', 25); piscar('#saldoNum', 'var(--bad)');
+    notificar(`Gasto de ${ev.v} BC: ${ev.d}. Saldo: ${ev.saldo} BC.`);
     await contarSaldo(ev.saldo);
   },
   async recusa(ev, ordem, meu) {
@@ -417,7 +476,31 @@ const CENAS = {
     if (meu) toast(`${ev.de} tirou a carta de sala "${ev.carta}"`);
   },
   async perdeu(ev, ordem, meu) {
-    if (meu) som('errada');
+    if (meu) { som('errada'); toast('Rodada perdida: ela passou sozinha.'); }
+  },
+  async kit(ev, ordem, meu) {
+    if (!meu) return;
+    confete(); som('certa', [40, 30, 80]); banner('Kit de Acampamento completo!', 'virada');
+  },
+  async canivete(ev, ordem, meu) {
+    if (!meu) return;
+    confete(); som('fogo'); banner(`Canivete! +${E.CANIVETE_PTS} pts`, 'virada');
+  },
+  async evento(ev, ordem, meu) {
+    if (!meu) return;
+    const loja = ev.loja ? ` · ${E.CASAS[ev.loja].nome}` : '';
+    banner(`${E.EVENTOS[ev.tipo].nome}!${loja}`, 'evento'); som('moeda');
+    await sleep(350);
+  },
+  async anuncio(ev, ordem, meu) {
+    if (meu) toast(`Na próxima rodada: ${E.descreverEvento(ev)}`);
+  },
+  async noite(ev, ordem, meu) {
+    if (meu) { banner('Noite no acampamento! Créditos e cartas certas valem em dobro', 'noite'); await sleep(300); }
+  },
+  async protegeu(ev, ordem, meu) {
+    if (!meu) return;
+    flutuar(peao(ordem), `${E.ITENS.find((i) => i.id === ev.item).nome} protegeu`, 'info'); som('certa');
   },
 };
 
@@ -464,8 +547,8 @@ function acao(t, extra = {}) {
   st.saida = [];
   if (r.erro) { E.esvaziarCena(st); if (st.pend?.tipo === 'loja') S.erro = r.erro; else toast(r.erro); atualizarJogo(); return; }
   S.erro = '';
-  const cena = E.esvaziarCena(st);
-  if (st.feito) E.fecharRodada(st);
+  let cena = E.esvaziarCena(st);
+  if (st.feito) { E.fecharRodada(st); E.passarRodadasPerdidas(st); cena = cena.concat(E.esvaziarCena(st)); }
   if (!st.pend) S.carrinho = {};
   ls.set('mt-solo', st);
   if (st.fim) {
@@ -615,7 +698,7 @@ function telaEntrada() {
     ${rec ? `<p class="note">Seu recorde jogando sozinho: <b>${rec.pontos} pts</b>.</p>` : ''}
     <details><summary>Como funciona cada casa</summary>
       <div class="casas">${casas.map(([k, t]) => `<div class="casa-info" style="--t:var(--c-${k})">${ic(k)}<b>${E.CASAS[k].nome}</b><span>${t}</span></div>`).join('')}</div>
-      <p class="note" style="margin-top:10px">Pontos: 10 por item do kit, +20 pelo kit completo, +10 por carta acertada, 1 pt a cada 10 BC que sobrarem e o bônus da meta secreta. Antes de rolar, você escolhe: rolar de graça, pagar 5 BC pelo dado duplo ou ajudar no acampamento e ganhar 15 BC. Acertar uma carta de Tempestade evita o revés. Desempate: saldo final, depois cartas acertadas.</p>
+      <p class="note" style="margin-top:10px">Pontos: 10 por item do kit, +20 pelo kit completo, +10 por carta acertada, 1 pt a cada 10 BC que sobrarem, o bônus da meta secreta e o Canivete do leilão. A cada 3 rodadas há um evento, anunciado antes; cada item do kit protege de um revés, e nas últimas rodadas créditos e cartas certas valem em dobro. Antes de rolar, você escolhe: rolar de graça, pagar 5 BC pelo dado duplo ou ajudar no acampamento e ganhar 15 BC. Acertar uma carta de Tempestade evita o revés. Desempate: saldo final, depois cartas acertadas.</p>
     </details>
   </div>
   <footer class="wrap rodape"><span class="tb">Um jogo do Trilha HUB</span>${linkHub('entrada', 'Conheça o Trilha HUB')}</footer>`;
@@ -686,6 +769,7 @@ function atualizarCasas(st) {
     c.classList.toggle('feira', !!(E.CASAS[k].loja && E.descontoFeira(st, k)));
     c.classList.toggle('aqui', st.pos === i);
   });
+  $('#board')?.classList.toggle('noite', !st.fim && E.noite(st));
 }
 function atualizarPontes(placar = S.placar) {
   E.TABULEIRO.forEach((k, i) => {
@@ -712,7 +796,7 @@ function blocoUltimo(st) {
   if (!st.resposta) return st.ultimo ? `<p>${esc(st.ultimo)}</p>` : '';
   const c = E.cartaMostrada(st, st.resposta.carta);
   const titulo = st.resposta.ok ? `Acertou! +${E.PTS_CARTA} pts.${st.resposta.evitou ? ' Você evitou o revés.' : ''}` : 'Não foi dessa vez.';
-  return `<div class="${st.resposta.ok ? 'okmsg' : 'erro'}"><b>${titulo}</b> ${esc(c.porque)}</div>
+  return `<div class="${st.resposta.ok ? 'okmsg brilho' : 'erro'}"><b>${titulo}</b> ${esc(c.porque)}</div>
     ${c.app ? `<p class="app-linha">${esc(c.app)} ${linkHub('carta', 'Conheça')}</p>` : ''}`;
 }
 
@@ -777,7 +861,7 @@ function painel(st) {
     ${st.skip ? '<p class="note">Você está parado: esta rodada só passa.</p>' : '<p><b>Como você quer jogar esta rodada?</b></p>'}
     <div class="escolhas">
       <button class="btn big primary" id="rolar" ${trava}><span>${ic('dado')}Rolar o dado</span><small>Grátis</small></button>
-      ${st.skip ? '' : `<button class="btn big" id="duplo" ${op.duplo && !S.aguardando ? '' : 'disabled'}>Dado duplo<small>Custa ${E.DADO_DUPLO_CUSTO} BC · rola dois e fica com um</small></button>
+      ${st.skip ? '' : `<button class="btn big" id="duplo" ${op.duplo && !S.aguardando ? '' : 'disabled'}>Dado duplo<small>${st.duploGratis > 0 ? 'Grátis, graças à Bússola' : `Custa ${E.DADO_DUPLO_CUSTO} BC`} · rola dois e fica com um</small></button>
       <button class="btn big" id="ajudar" ${op.ajudar && !S.aguardando ? '' : 'disabled'}>Ajudar no acampamento<small>Não anda · ganha ${E.AJUDA_GANHO} BC</small></button>`}
     </div></div>`;
 }
@@ -796,7 +880,11 @@ function conta(st, cor) {
 }
 
 function placarHtml() {
-  return `<div class="placar">${S.placar.map((p, i) => `<div class="pl${p.eu ? ' eu' : ''}" style="--pc:${p.cor}"><span class="pos">${i + 1}</span><img src="${fichaSrc(p.ficha)}" alt="${esc(fichaNome(p.ficha))}"><div><div class="nm">${esc(p.apelido)}${p.eu ? ' (você)' : ''}</div><div class="meta">Kit ${p.kit}/7 · rodada ${Math.min(p.rodada + (p.fim ? 0 : 1), S.sala?.rodadas || 12)}${p.fim ? ' · terminou' : ''}${S.sala?.tipo === 'espera' && p.feito && !p.fim ? ' · pronto' : ''} · ${p.saldo} BC</div></div><span class="pts">${p.pontos} pts</span></div>`).join('')}</div>`;
+  const agora = Date.now();
+  return `<div class="placar">${S.placar.map((p, i) => {
+    const seta = S.setas[p.ordem], d = S.delta[p.ordem];
+    return `<div class="pl${p.eu ? ' eu' : ''}" style="--pc:${p.cor}"><span class="pos">${i + 1}${seta ? `<span class="seta ${seta}" aria-label="${seta === 'up' ? 'subiu' : 'desceu'}">${seta === 'up' ? '▲' : '▼'}</span>` : ''}</span><img src="${fichaSrc(p.ficha)}" alt="${esc(fichaNome(p.ficha))}"><div><div class="nm">${esc(p.apelido)}${p.eu ? ' (você)' : ''}</div><div class="meta">Kit ${p.kit}/7 · rodada ${Math.min(p.rodada + (p.fim ? 0 : 1), S.sala?.rodadas || 12)}${p.fim ? ' · terminou' : ''}${S.sala?.tipo === 'espera' && p.feito && !p.fim ? ' · pronto' : ''} · ${p.saldo} BC</div></div><span class="pts">${d && d.ate > agora ? `<span class="delta">+${d.v}</span>` : ''}${p.pontos} pts</span></div>`;
+  }).join('')}</div>`;
 }
 
 function anfitriao() {
@@ -805,6 +893,7 @@ function anfitriao() {
   return `<div class="painel anfitriao" style="--t:var(--c-bussola)"><div class="tag">Painel do anfitrião</div>
     <div class="row" style="justify-content:space-between"><span class="codigo">${esc(s.codigo)}</span><button class="btn sm" id="copiar">Copiar código</button></div>
     <p class="note">Mande este código pelo grupo. ${s.jogando} jogando, ${s.terminaram} terminaram, ${s.total} de ${s.max} na sala.</p>
+    ${s.podeLeilao ? `<div class="row"><button class="btn sm" id="abrirLeilao">Abrir o leilão do Canivete</button></div><p class="note">Todos dão um lance fechado por 10 s; o Canivete vale +${E.CANIVETE_PTS} pts. Só uma vez por sala.</p>` : ''}
     ${s.status === 'aberta' ? `<div class="row"><button class="btn sm danger" id="encerrar">${S.confirmarEncerrar ? 'Confirmar: encerrar a sala' : 'Encerrar sala'}</button>${S.confirmarEncerrar ? '<button class="btn sm" id="cancelarEnc">Cancelar</button>' : ''}</div>` : '<p class="note">Sala encerrada.</p>'}
     <div class="promo"><b>Leve o Trilha HUB para o seu grupo</b><span class="note">A carteira de evento de verdade: recarga por Pix, pagamento por QR ou pulseira e avisos de gasto no WhatsApp dos responsáveis.</span>${linkHub('anfitriao', 'Ver como funciona')}</div></div>`;
 }
@@ -816,7 +905,7 @@ function muralHtml() {
 function barraTopo(st) {
   const s = S.sala, espera = S.modo === 'sala' && s?.tipo === 'espera';
   const modoChip = S.modo === 'solo' ? '<span class="chip">Sozinho</span>' : espera ? '<span class="chip">Sala de espera</span>' : `<span class="chip">Sala <b>${esc(s?.codigo)}</b></span>`;
-  return topo(`${modoChip}<span class="chip">Rodada <b>${E.rodadaAtual(st)}/${st.rodadas}</b></span><span class="sp"></span>${botaoSom()}<button class="btn sm" id="sair">${S.modo === 'solo' ? 'Pausar' : 'Sair'}</button>${espera && s.status === 'em_jogo' ? '<div class="timer" id="timer"><i></i></div>' : ''}`);
+  return topo(`${modoChip}<span class="chip">Rodada <b>${E.rodadaAtual(st)}/${st.rodadas}</b></span><span class="sp"></span>${botaoSom()}<button class="btn sm" id="sair">${S.modo === 'solo' ? 'Pausar' : 'Sair'}</button>${espera && s.status === 'em_jogo' ? '<div class="timer" id="timer"><i></i></div><div class="pend-top" id="pend"></div>' : ''}`);
 }
 
 function reacoesHtml() {
@@ -836,9 +925,33 @@ function montarJogo() {
   </div>`;
 }
 
+// A5 e C3: votação do próximo evento e leilão do Canivete, abertos por 10 s.
+// Na sala de espera ocupam o lugar do painel da rodada; nas salas com código vão por cima dele.
+function painelJanela() {
+  const s = S.sala, st = eu();
+  if (!s || (!s.voto && !s.leilao) || !st || st.fim) return { html: '', exclusivo: false };
+  let html = '';
+  if (s.voto) {
+    const v = s.voto;
+    html += `<div class="painel janela" style="--t:var(--c-fogo)"><div class="tag">Votação do próximo evento · <span data-fim="${v.fimEm}"></span></div>
+      <p><b>Qual evento vem na rodada ${v.rodada}?</b></p>
+      <div class="opcoes">${v.opcoes.map((o, i) => `<button class="opcao${v.meuVoto === i ? ' escolhida' : ''}" data-voto="${i}"><b>${esc(o.nome)}</b><br><span class="note">${esc(o.texto)}</span></button>`).join('')}</div>
+      <p class="note">${v.meuVoto != null ? 'Voto registrado. Você pode trocar até o tempo acabar. ' : ''}${v.votaram} voto(s). Empate sorteia.</p></div>`;
+  }
+  if (s.leilao) {
+    const l = s.leilao;
+    html += `<div class="painel janela" style="--t:var(--c-partida)"><div class="tag">Leilão do Canivete · <span data-fim="${l.fimEm}"></span></div>
+      <p><b>Canivete: +${l.pts} pts no fim.</b> Um lance só, fechado. Ganha o maior; no empate, quem tem menos saldo.</p>
+      <div class="lances">${l.lances.map((v) => `<button class="btn${l.meuLance === v ? ' primary' : ''}" data-lance="${v}" ${v > st.saldo ? 'disabled' : ''}>${v} BC</button>`).join('')}</div>
+      <p class="note">${l.meuLance != null ? `Seu lance: ${l.meuLance} BC. Você só paga se ganhar. ` : 'Você só paga se ganhar, e não dá para oferecer mais do que o saldo. '}${l.deram} lance(s).</p></div>`;
+  }
+  return { html, exclusivo: s.tipo === 'espera' };
+}
+
 function atualizarPainel() {
   const st = eu(); const el = $('#painel'); if (!st || !el) return;
-  el.innerHTML = painel(st); ligarPainel();
+  const j = painelJanela();
+  el.innerHTML = j.html + (j.exclusivo ? '' : painel(st)); ligarPainel(); tique();
 }
 function atualizarMural() { const el = $('#mural'); if (el) el.innerHTML = muralHtml(); }
 
@@ -853,7 +966,7 @@ function atualizarJogo() {
   $('#conta-box').innerHTML = conta(st, cor);
   atualizarPainel();
   if (S.modo === 'sala') {
-    $('#placar').innerHTML = placarHtml(); $('#anfitriao').innerHTML = anfitriao(); atualizarMural(); ligarAnfitriao();
+    atualizarPlacar(); $('#anfitriao').innerHTML = anfitriao(); atualizarMural(); ligarAnfitriao();
   }
   atualizarCasas(st); atualizarCentro(st); atualizarPontes();
   if (nova || !S.cenaEmCurso) sincronizarPeoes(S.placar);
@@ -890,9 +1003,12 @@ function ligarPainel() {
   app.querySelectorAll('[data-resp]').forEach((b) => b.addEventListener('click', () => acao('responder', { i: Number(b.dataset.resp) })));
   $('#pagar')?.addEventListener('click', () => acao('pagar'));
   $('#arriscar')?.addEventListener('click', () => acao('arriscar'));
+  app.querySelectorAll('[data-voto]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'votar_evento', i: Number(b.dataset.voto) })));
+  app.querySelectorAll('[data-lance]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'dar_lance', valor: Number(b.dataset.lance) })));
 }
 
 function ligarAnfitriao() {
+  $('#abrirLeilao')?.addEventListener('click', () => enviar({ t: 'abrir_leilao' }));
   $('#copiar')?.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(S.sala.codigo); toast('Código copiado.'); } catch { toast(`Código: ${S.sala.codigo}`); }
   });
@@ -924,6 +1040,7 @@ function telaResultado() {
       <div class="pt"><span>Cartas acertadas (${st.acertos} × ${E.PTS_CARTA})</span><b>${p.cartas}</b></div>
       <div class="pt"><span>Saldo final (${st.saldo} BC ÷ 10)</span><b>${p.saldo}</b></div>
       <div class="pt"><span>Meta secreta: ${esc(meta?.nome || '')} · ${cumpriu ? 'cumprida' : 'não cumprida'}</span><b>${p.meta}</b></div>
+      ${p.canivete ? `<div class="pt"><span>Canivete do leilão</span><b>${p.canivete}</b></div>` : ''}
       <div class="pt total"><span>Total</span><b>${p.total} pts</b></div>
     </div>
     ${metasSala ? `<div class="box"><div class="eyebrow">Metas dos outros jogadores</div><ul class="metas-sala">${metasSala}</ul></div>` : ''}
@@ -968,11 +1085,16 @@ function tique() {
   if (dica) dica.textContent = DICAS[Math.floor(Date.now() / 7000) % DICAS.length];
   const tm = $('#timer');
   if (tm && S.sala?.fimRodadaEm) {
-    const resto = Math.max(0, S.sala.fimRodadaEm - agora), frac = resto / (E.TEMPO_RODADA_S * 1000);
+    const resto = Math.max(0, S.sala.fimRodadaEm - agora), frac = resto / (S.sala.baseMs || E.TEMPO_RODADA_S * 1000);
     tm.firstElementChild.style.width = `${Math.min(100, frac * 100)}%`;
     tm.classList.toggle('pouco', resto < 10000);
     tm.setAttribute('aria-label', `${Math.ceil(resto / 1000)} segundos para fechar a rodada`);
+    const pend = $('#pend');
+    if (pend) pend.textContent = resto < 10000 && S.sala.pendentes?.length ? `Ainda decidindo: ${S.sala.pendentes.join(', ')}` : '';
   }
+  document.querySelectorAll('[data-fim]').forEach((el) => {
+    el.textContent = `${Math.max(0, Math.ceil((Number(el.dataset.fim) - agora) / 1000))} s`;
+  });
 }
 setInterval(tique, 250);
 setInterval(() => { if (ws && ws.readyState === 1) ws.send('{"t":"ping"}'); }, 25000);
