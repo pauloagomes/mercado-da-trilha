@@ -625,6 +625,7 @@ export function resumoPublico(st) {
   return {
     apelido: st.apelido, ficha: st.ficha, pos: st.pos, rodada: st.rodada, fim: st.fim,
     pontos: pontuacao(st).total, saldo: st.saldo, acertos: st.acertos, kit: st.kit.length,
+    meta: st.fim ? { id: st.meta, ok: metaCumprida(st) } : null, // revelada só no fim
   };
 }
 

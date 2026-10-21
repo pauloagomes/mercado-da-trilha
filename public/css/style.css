@@ -97,22 +97,19 @@ label.f { display: grid; gap: 4px; font-size: .9rem; font-weight: 600; }
 .dica { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--sun); border-radius: 0 12px 12px 0; padding: 12px 14px; min-height: 3.6em; }
 
 /* Jogo */
+#topo-jogo { display: contents; }
+.boardbox { min-width: 0; display: grid; gap: 8px; align-content: start; }
 .jogo { padding-block: 16px 36px; display: grid; gap: 18px; }
 .j-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 400px); gap: 16px; align-items: start; }
 @media (max-width: 900px) { .j-main { grid-template-columns: 1fr; } }
-.board { display: grid; grid-template-columns: repeat(6, 1fr); grid-template-rows: repeat(6, 1fr); gap: 4px; aspect-ratio: 1; max-width: 100%; background: var(--hero); padding: 6px; border-radius: 16px; }
-.cell { background: color-mix(in srgb, var(--t) 14%, var(--panel)); border-radius: 7px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 12px 2px 4px; min-width: 0; overflow: hidden; }
+.board { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); grid-template-rows: repeat(6, 1fr); gap: 4px; aspect-ratio: 1; max-width: 100%; background: var(--hero); padding: 6px; border-radius: 16px; }
+.cell { background: color-mix(in srgb, var(--t) 14%, var(--panel)); border-radius: 7px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; padding: 13px 2px 4px; min-width: 0; overflow: hidden; }
 .cell::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 8px; background: var(--t); }
 .cell svg.ic { font-size: clamp(15px, 3.2vw, 26px); color: var(--t); }
 .cell .lbl { font-size: clamp(8.5px, 1.1vw, 11.5px); font-weight: 700; text-align: center; line-height: 1.1; overflow-wrap: anywhere; }
 .cell.fechada { background: repeating-linear-gradient(45deg, var(--panel2) 0 6px, var(--panel) 6px 12px); }
 .cell.feira::after { content: "-5"; position: absolute; top: 10px; right: 4px; font-size: 10px; font-weight: 800; color: var(--good); }
 .cell.aqui { outline: 3px solid var(--sun); outline-offset: -3px; }
-.peoes { position: absolute; bottom: 3px; left: 3px; right: 3px; display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; }
-.peao { width: clamp(14px, 2.6vw, 24px); height: clamp(14px, 2.6vw, 24px); border-radius: 50%; border: 2px solid var(--pc); background: var(--panel); }
-.peao.eu { width: clamp(20px, 3.6vw, 34px); height: clamp(20px, 3.6vw, 34px); border-width: 3px; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
-.peao img { width: 100%; height: 100%; border-radius: 50%; display: block; }
-.mais { font-size: 10px; font-weight: 800; align-self: center; }
 @media (max-width: 520px) { .cell .lbl { display: none; } }
 .centro { grid-column: 2 / 6; grid-row: 2 / 6; background: var(--panel); border-radius: 9px; display: grid; place-items: center; align-content: center; gap: 10px; padding: 10px; text-align: center; }
 .centro .nome { font-family: var(--display); font-weight: 700; font-size: clamp(.95rem, 2.6vw, 1.5rem); line-height: 1.05; }
@@ -120,7 +117,7 @@ label.f { display: grid; gap: 4px; font-size: .9rem; font-weight: 600; }
 .dado { width: clamp(52px, 10vw, 80px); aspect-ratio: 1; border-radius: 16px; background: var(--panel); border: 3px solid var(--ink); display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); padding: 10%; box-shadow: 0 4px 0 var(--ink); }
 .dado i { display: block; width: clamp(7px, 1.7vw, 12px); height: clamp(7px, 1.7vw, 12px); border-radius: 50%; background: var(--ink); place-self: center; visibility: hidden; }
 .dado i.on { visibility: visible; }
-.dado.rolando { animation: tremer .12s linear infinite; }
+.dados.rolando .dado { animation: tremer .12s linear infinite; }
 @keyframes tremer { 0% { transform: rotate(-9deg); } 50% { transform: rotate(9deg); } 100% { transform: rotate(-9deg); } }
 
 .side { display: grid; gap: 14px; min-width: 0; }
@@ -203,3 +200,36 @@ details summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
 .fogo-banner { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%); z-index: 31; font-family: var(--display); font-size: clamp(1.6rem, 6vw, 2.8rem); color: #FFF4D6; text-shadow: 0 2px 12px rgba(120, 30, 0, .8); pointer-events: none; text-align: center; }
 [hidden] { display: none !important; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* Camada dos peões (D0): fica sobre o tabuleiro e só usa transform nas animações */
+.peoes-camada { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.peao2 { position: absolute; left: 0; top: 0; border-radius: 50%; border: 2px solid var(--pc); background: var(--panel); transition: transform 110ms linear; will-change: transform; }
+.peao2.eu { border-width: 3px; box-shadow: 0 1px 3px rgba(0, 0, 0, .45); z-index: 1; }
+.peao2 img { width: 100%; height: 100%; border-radius: 50%; display: block; }
+.peao2 img.pulo { animation: pulo 120ms ease-out; }
+@keyframes pulo { 50% { transform: translateY(-32%); } }
+.cell .farol { position: absolute; inset: 0; border: 3px solid var(--sun); border-radius: 7px; opacity: 0; pointer-events: none; }
+.cell.destino .farol { animation: farol .9s ease-out; }
+@keyframes farol { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+.guardiao { position: absolute; top: 10px; left: 3px; width: clamp(14px, 2.6vw, 22px); height: clamp(14px, 2.6vw, 22px); border-radius: 50%; border: 2px solid var(--pc); background: var(--panel); }
+.guardiao img { width: 100%; height: 100%; border-radius: 50%; display: block; }
+
+.dados { display: flex; gap: 8px; justify-content: center; align-items: center; min-height: 40px; }
+.dados:has(.dado + .dado) .dado { width: clamp(40px, 7.5vw, 60px); border-radius: 12px; padding: 8%; }
+.flut, .reacao-bolha { position: absolute; z-index: 5; pointer-events: none; white-space: nowrap; font-weight: 800; font-size: .85rem; background: var(--panel); border: 2px solid var(--good); color: var(--ink); border-radius: 999px; padding: 1px 9px; animation: flutua 1.1s ease-out forwards; }
+.flut.info { border-color: var(--c-bussola); }
+.reacao-bolha { font-size: 1rem; border-color: var(--sun); animation-duration: 1.7s; }
+@keyframes flutua { 0% { opacity: 0; transform: translate(-50%, 4px); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -30px); } }
+.moeda-voa { position: fixed; left: 0; top: 0; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--coin); border: 2px solid #8A5D00; z-index: 35; pointer-events: none; will-change: transform; }
+
+.escolhas { display: grid; gap: 8px; }
+.escolhas .btn.big { display: grid; justify-items: start; text-align: left; gap: 2px; }
+.escolhas .btn.big svg.ic { vertical-align: -.12em; margin-right: 6px; }
+.btn small { display: block; font-weight: 500; font-size: .8rem; opacity: .85; }
+.duplo { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dado-esc { display: grid; justify-items: center; gap: 8px; padding: 12px 8px; }
+.dado-esc .dado { width: 64px; }
+.reacoes { display: flex; flex-wrap: wrap; gap: 6px; }
+.meta-card { display: grid; gap: 2px; border: 1px dashed var(--line); border-radius: 12px; padding: 8px 12px; background: color-mix(in srgb, var(--sun) 9%, var(--panel)); }
+.metas-sala { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; font-size: .92rem; }
+.btn-som { display: inline-flex; gap: 6px; align-items: center; }

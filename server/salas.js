@@ -182,6 +182,16 @@ function pontesPublicas(sala) {
   return r;
 }
 
+// O que o jogador vê de si: o guardião anterior da ponte chega pelo apelido, nunca pelo id interno.
+function visaoDoJogador(sala, p) {
+  const v = { ...E.visaoPropria(p.st), cor: p.cor, ordem: p.ordem };
+  if (v.pend?.guardiao) {
+    const g = sala.jogadores.get(v.pend.guardiao);
+    v.pend = { ...v.pend, guardiao: undefined, guardiaoApelido: g?.st.apelido || null };
+  }
+  return v;
+}
+
 export function transmitir(sala) {
   for (const ws of sala.sockets) {
     const id = ws.jogadorId;
@@ -189,7 +199,7 @@ export function transmitir(sala) {
     enviar(ws, {
       t: 'estado',
       sala: infoSala(sala, id),
-      eu: p ? { ...E.visaoPropria(p.st), cor: p.cor } : null,
+      eu: p ? visaoDoJogador(sala, p) : null,
       placar: placar(sala, id),
       mural: sala.mural.slice(-15),
       pontes: pontesPublicas(sala),

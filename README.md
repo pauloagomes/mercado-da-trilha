@@ -42,10 +42,32 @@ O servidor aplica as migrações de `server/migrations` sozinho ao iniciar. Para
 Testes:
 
 ```bash
-npm test                                                # regras do jogo
+npm test                                                # regras do jogo e simulação de balanceamento
+npm run simular                                         # métricas do RFC com o motor atual (4000 partidas por medida)
+DATABASE_URL=postgres://... npm run test:integracao     # salas no PostgreSQL: guardião, dado duplo, carta de sala, reação
 CONTAGEM_FILA_MS=1500 RODADA_MS=1500 npm start          # num terminal
 node test/e2e.mjs                                       # em outro: salas, fila e rodadas sincronizadas
 ```
+
+O e2e depende de `RODADA_MS=1500`: com o padrão de 45 s as 12 rodadas da sala de espera não cabem no tempo do teste.
+
+## Regras da Etapa 1 (RFC "Mercado da Trilha mais divertido e interativo")
+
+Todas valem no jogo sozinho e nas salas, exceto onde indicado. As regras ficam em `public/js/engine.js` e têm teste em `test/engine.test.js`.
+
+- **Escolha antes do dado (B1).** Rolar (grátis), Dado duplo (5 BC: rola dois dados e escolhe um) ou Ajudar no acampamento (não anda e ganha 15 BC; fica indisponível se a conta passaria de 300 BC). Parado, só dá para rolar.
+- **Perdido (B2).** Pagar 10 BC ou arriscar o dado: de 4 a 6 acha a trilha de graça, de 1 a 3 perde a próxima rodada.
+- **Metas secretas (B3).** 12 metas; cada jogador da sala recebe uma diferente. O jogador vê a própria meta desde o início, os outros só a veem no fim, e o bônus entra na pontuação só quando a partida acaba.
+- **Acerto muda o efeito (B4).** Cada carta certa vale 10 pts, e acertar uma carta de Tempestade evita o revés.
+- **Opções embaralhadas (F1).** A ordem das 3 opções de cada carta muda por partida, pela semente, igual para a sala toda.
+- **Guardião da ponte (A1, salas).** Quem para primeiro num Pedágio vira guardião até outro jogador parar ali. O pedágio vai para o caixa do evento (nenhum BC passa de jogador para jogador) e o guardião ganha 3 BC de gratificação por pedágio pago; crédito acima de 300 BC é recusado.
+- **Cartas de sala (A2, salas).** Quatro cartas valem para todos (Mutirão, Janta da patrulha, Chuva, Ventania); quem tirou ganha 5 BC. Quem acerta a pergunta de uma carta de sala de Tempestade fica de fora do revés. Pagamento recusado por carta de sala não tira a vez de quem não tirou a carta.
+- **Reações rápidas (A3, salas).** Seis reações fixas, sem alvo, uma a cada 3 s por jogador.
+- **Sensação de jogo (D0 a D3, D5).** Tabuleiro e peões ficam na tela e só os painéis são redesenhados; o peão anda casa a casa, o dado gira no centro, moedas voam para o saldo e o número conta. Sons curtos gerados no navegador (Web Audio, sem arquivo) e vibração curta no Android; o botão do topo liga e desliga, e a escolha fica no aparelho. Com "reduzir movimento" as animações viram troca direta.
+
+### Como o servidor e a tela falam
+
+Cada jogada do motor devolve uma `cena` (dado, andou, crédito, gasto, recusa, fogo, ponte...). O servidor guarda as últimas 16 e manda junto com o estado, para os outros celulares animarem; a tela segura cada estado até a animação anterior terminar e pula as animações se a fila atrasar. A partida do jogo sozinho salva no aparelho (`mt-solo`) mudou de formato (`v: 2`): a antiga é descartada com um aviso.
 
 ## Instalar no servidor (Docker Compose)
 
@@ -103,8 +125,15 @@ O apelido aparece no placar e no mural para outros jogadores, então o servidor 
 
 As 12 fichas em `public/img/fichas/` são **provisórias**, desenhadas em SVG simples. Substitua pelas artes geradas por IA e revisadas, mantendo os mesmos nomes de arquivo (`f01.svg` a `f12.svg`, ou troque a extensão em `fichaSrc` no `app.js`) e os nomes em `FICHAS` no `engine.js`. Formato: redondo, 256 px, fundo transparente, uniforme genérico sem a flor-de-lis oficial nem logotipos dos Escoteiros do Brasil.
 
+## Simulação de balanceamento
+
+`test/sim.js` joga partidas com o motor e `test/balanceamento.test.js` confere faixas-alvo no `npm test`. O jogador de referência é o do RFC: compra tudo o que cabe, usa o dado duplo com 25 BC ou mais quando falta item e acerta 80% das cartas (50% para os rivais da mesa de 4). Contra o motor antigo (commit 0fc650a) a simulação reproduz o diagnóstico do RFC: 5,8 rodadas sem escolha (RFC: 5,9), 36% de vitória de quem sabe as regras, 95 BC de saldo final.
+
+Cada etapa tem uma faixa mínima (`FAIXAS.etapa`) e o RFC define a meta de lançamento (`FAIXAS.lancamento`); `npm run simular` mostra as duas. Na Etapa 1 o jogo chega a 42% de vitória de quem sabe as regras (meta: 44%) e a 17% de partidas com pagamento recusado (meta: 30% a 50%). As metas de lançamento dependem de conteúdo das etapas 2 e 3 (eventos, Visita dos pais e 36 cartas).
+
 ## Próximos passos
 
 - Trocar as fichas provisórias pelas artes finais.
 - Confirmar o destino de `TRILHAHUB_URL`.
 - Quadro de recordes, com e-mail do responsável confirmado por código (está desenhado no plano, ainda não foi implementado).
+- Etapa 2 do RFC: rodada viva (feira anunciada, eventos a cada 3 rodadas, leilão, reta final, relógio por jogada), itens com poder e respostas plausíveis.
