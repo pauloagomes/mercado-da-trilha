@@ -190,29 +190,30 @@ Cada etapa tem uma faixa mínima (`FAIXAS.etapa`) e o RFC define a meta de lanç
 
 ## 🤝 Contribuindo
 
-Este projeto é open source e contribuições da comunidade são muito bem-vindas!
+Este projeto é open source e contribuições da comunidade são muito bem-vindas.
 
-Você pode contribuir de diversas formas:
+Você pode reportar bugs, sugerir funcionalidades, melhorar a documentação,
+contribuir com código e criar traduções.
 
-- 🐛 Reportando bugs.
-- 💡 Sugerindo novas funcionalidades.
-- 🎮 Propondo melhorias para o jogo.
-- 📝 Melhorando a documentação.
-- 💻 Enviando correções e melhorias no código.
-- 🔧 Criando Pull Requests.
+Leia o [CONTRIBUTING.md](CONTRIBUTING.md) antes de contribuir e consulte o
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-Antes de contribuir, recomendamos a leitura do nosso **[Guia de Contribuição](CONTRIBUTING.md)**.
+### Privacidade
 
-Para manter uma comunidade saudável e colaborativa, também pedimos que todos os participantes conheçam nosso **[Código de Conduta](CODE_OF_CONDUCT.md)**.
+Consulte o [PRIVACY.md](PRIVACY.md). Contribuidores não devem utilizar dados
+reais de usuários em desenvolvimento ou testes.
 
-### ⏳ Sobre revisões e respostas
+### Segurança
 
-Este é um projeto desenvolvido de forma contínua e as contribuições são analisadas conforme a disponibilidade dos mantenedores.
+Vulnerabilidades não devem ser publicadas com detalhes sensíveis em Issues.
+Consulte o [SECURITY.md](SECURITY.md).
 
-Uma Issue ou Pull Request pode levar algum tempo para ser analisada e **não existe garantia de prazo para resposta, aprovação ou implementação**.
+### Marcas
 
-Todas as sugestões serão consideradas, mas a decisão de incorporar uma alteração ao projeto cabe aos mantenedores.
+O código é MIT, mas marcas, logos e identidade visual do Trilha Hub não fazem
+parte automaticamente da licença. Consulte o [TRADEMARKS.md](TRADEMARKS.md).
 
-Se você tiver uma ideia, encontrou um problema ou quiser ajudar a melhorar o jogo, abra uma **Issue** ou envie um **Pull Request**.
+### Terceiros
 
-Toda contribuição é bem-vinda. ❤️
+Bibliotecas, imagens, sons e outros componentes podem possuir licenças
+próprias. Consulte o [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

@@ -2,6 +2,7 @@
   "name": "mercado-da-trilha",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Jogo de treino da carteira de evento do Trilha HUB, com a moeda BadenCoin.",
   "type": "module",
   "engines": {
