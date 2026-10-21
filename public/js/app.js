@@ -327,7 +327,28 @@ async function animarCena(c, m) {
 const celula = (i) => $(`#board [data-casa="${i}"]`);
 const peao = (o) => $(`#peoes [data-o="${o}"]`);
 
-function pintarDado(el, v) { el.querySelectorAll('i').forEach((p, k) => p.classList.toggle('on', PIPS[v].includes(k))); }
+// Dado 3D do centro do tabuleiro: um cubo com as 6 faces. Cada face fica num lado do cubo e,
+// para mostrar o valor v de frente, o cubo gira o contrário (ROT). A rolagem anima só transform.
+const FACE_LADO = { 1: 'rotateY(0deg)', 2: 'rotateY(90deg)', 3: 'rotateX(90deg)', 4: 'rotateX(-90deg)', 5: 'rotateY(-90deg)', 6: 'rotateY(180deg)' };
+const ROT = { 1: [0, 0], 2: [0, -90], 3: [-90, 0], 4: [90, 0], 5: [0, 90], 6: [0, 180] };
+const giro = (v) => `rotateX(${ROT[v][0]}deg) rotateY(${ROT[v][1]}deg)`;
+const dado3dHtml = (v) => `<div class="d3" role="img" aria-label="Dado: ${v}"><div class="d3-pulo"><div class="d3-vista"><div class="d3-cubo" style="transform:${giro(v)}">${[1, 2, 3, 4, 5, 6].map((f) => `<div class="d3-face" style="transform:${FACE_LADO[f]} translateZ(calc(var(--s) / 2))">${[...Array(9)].map((_, k) => `<i class="${PIPS[f].includes(k) ? 'on' : ''}"></i>`).join('')}</div>`).join('')}</div></div></div><i class="d3-sombra"></i></div>`;
+// Joga o dado: duas voltas e pouco no ar, um quique e para na face `v`. Com "reduzir movimento" só mostra a face.
+function rolar3d(el, v, atraso = 0) {
+  const cubo = el.querySelector('.d3-cubo'), pulo = el.querySelector('.d3-pulo'), sombra = el.querySelector('.d3-sombra');
+  const fim = giro(v);
+  cubo.style.transform = fim;
+  if (reduzir) return Promise.resolve();
+  const [x, y] = ROT[v], dur = 720;
+  const ini = `rotateX(${x - 720 - Math.round(Math.random() * 180)}deg) rotateY(${y - 360 - Math.round(Math.random() * 180)}deg)`;
+  const a = cubo.animate([{ transform: ini }, { transform: fim }], { duration: dur, delay: atraso, easing: 'cubic-bezier(.12,.62,.28,1)', fill: 'backwards' });
+  pulo.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-42%)', offset: 0.3 }, { transform: 'translateY(0)', offset: 0.62 },
+    { transform: 'translateY(-10%)', offset: 0.8 }, { transform: 'translateY(0)' }], { duration: dur, delay: atraso, easing: 'ease-out' });
+  sombra.animate([{ transform: 'scale(1)', opacity: 0.5 }, { transform: 'scale(.55)', opacity: 0.2, offset: 0.3 }, { transform: 'scale(1)', opacity: 0.5, offset: 0.62 },
+    { transform: 'scale(.85)', opacity: 0.4, offset: 0.8 }, { transform: 'scale(1)', opacity: 0.5 }], { duration: dur, delay: atraso });
+  return a.finished.catch(() => {});
+}
+
 const dadoHtml = (v, extra = '') => `<div class="dado${extra}" aria-label="Dado: ${v}">${[...Array(9)].map((_, k) => `<i class="${PIPS[v].includes(k) ? 'on' : ''}"></i>`).join('')}</div>`;
 
 // Posiciona cada peão na casa onde está desenhado; vários na mesma casa dividem o espaço.
@@ -422,21 +443,22 @@ const CENAS = {
     if (!meu) return;
     const box = $('#dados'); if (!box) return;
     const n = ev.v.length;
-    box.innerHTML = ev.v.map(() => dadoHtml(1)).join('');
+    box.innerHTML = ev.v.map((v) => dado3dHtml(v)).join('');
     box.classList.add('rolando'); som('dado', 15);
-    const t0 = performance.now();
-    while (performance.now() - t0 < 600) {
-      box.querySelectorAll('.dado').forEach((d) => pintarDado(d, 1 + Math.floor(Math.random() * 6)));
-      await sleep(90);
-    }
+    await Promise.all([...box.querySelectorAll('.d3')].map((el, i) => rolar3d(el, ev.v[i], i * 110)));
     box.classList.remove('rolando');
-    box.innerHTML = ev.v.map((v) => dadoHtml(v)).join('');
     if (n === 1) { const dest = celula((S.peaoPos[ordem] + ev.v[0]) % E.TABULEIRO.length); dest?.classList.add('destino'); setTimeout(() => dest?.classList.remove('destino'), 900); }
   },
   async escolheu(ev, ordem, meu) {
     if (!meu) return;
     const box = $('#dados'); if (!box) return;
-    box.innerHTML = dadoHtml(ev.v);
+    // o dado que ficou cresce um pouco e o outro some
+    const ds = box.querySelectorAll('.d3');
+    if (ds.length === 2 && !reduzir) {
+      ds[1 - ev.i].animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.6)' }], { duration: 220, fill: 'forwards' });
+      await ds[ev.i].animate([{ transform: 'scale(1)' }, { transform: 'scale(1.15)' }, { transform: 'scale(1)' }], { duration: 260 }).finished.catch(() => {});
+    }
+    box.innerHTML = dado3dHtml(ev.v);
     const dest = celula((S.peaoPos[ordem] + ev.v) % E.TABULEIRO.length);
     dest?.classList.add('destino'); setTimeout(() => dest?.classList.remove('destino'), 900);
     await sleep(160);
@@ -484,8 +506,10 @@ const CENAS = {
   async arriscou(ev, ordem, meu) {
     if (!meu) return;
     const box = $('#dados'); if (!box) return;
-    box.innerHTML = dadoHtml(ev.v); som('dado', 15);
-    await sleep(500);
+    box.innerHTML = dado3dHtml(ev.v); box.classList.add('rolando'); som('dado', 15);
+    await rolar3d(box.querySelector('.d3'), ev.v);
+    box.classList.remove('rolando');
+    await sleep(150);
   },
   async ponte(ev, ordem, meu, m) {
     const quem = m.placar.find((p) => p.ordem === ordem);
@@ -1067,7 +1091,7 @@ function atualizarCentro(st) {
   if (nota) nota.textContent = st.ultimo || 'Escolha como jogar a rodada.';
   if (!box || box.classList.contains('rolando')) return;
   const dados = st.pend?.tipo === 'dado' ? st.pend.dados : st.dado ? [st.dado] : [5];
-  box.innerHTML = dados.map((v) => dadoHtml(v)).join('');
+  box.innerHTML = dados.map((v) => dado3dHtml(v)).join('');
 }
 
 function blocoUltimo(st) {
