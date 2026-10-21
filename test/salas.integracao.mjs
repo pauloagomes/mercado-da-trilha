@@ -254,6 +254,56 @@ try {
     for (const c of criadas) await pool.query('DELETE FROM salas WHERE codigo = $1', [c]);
     await pool.query('DELETE FROM jogadores WHERE id = $1', [cris.id]);
   }
+  // ---- Etapa 4: missão da sala e Feira de Trocas
+  const criadas4 = [];
+  try {
+    const wa6 = falso(ana), wb6 = falso(beto);
+    const s6 = await S.criarSalaCodigo(ana, 8); criadas4.push(s6.codigo);
+    await S.entrarNaSala(wa6, ana, s6.codigo); await S.entrarNaSala(wb6, beto, s6.codigo);
+    const A6 = s6.jogadores.get(ana.id), B6 = s6.jogadores.get(beto.id);
+    assert.ok(E.missaoPorId(s6.missao.id), 'toda sala tem uma missão');
+    assert.equal(wa6.ultimo('estado').sala.missao.pts, 15);
+    assert.deepEqual(s6.missao, { id: E.missaoDaPartida(s6.semente).id, vencedor: null });
+
+    // F6: quem completa o conjunto de itens primeiro leva 15 pts
+    s6.missao = { id: 'cozinha', vencedor: null };
+    B6.st.kit = ['panela']; B6.st.pos = 1; B6.st.rolou = true; B6.st.pend = { tipo: 'loja', loja: 'util' };
+    await S.agir(wb6, beto, { t: 'comprar', itens: ['lona'] });
+    await s6.gravando;
+    assert.equal(s6.missao.vencedor, beto.id);
+    assert.equal(B6.st.missaoPts, 15);
+    assert.equal(wa6.ultimo('estado').sala.missao.vencedor, 'Beto');
+    assert.ok(s6.mural.some((m) => /Beto cumpriu a missão da sala primeiro/.test(m.texto)));
+    const [{ missao }] = await rows('SELECT missao FROM salas WHERE codigo = $1', [s6.codigo]);
+    assert.equal(missao.vencedor, beto.id, 'o vencedor fica gravado');
+    S._interno.salas.delete(s6.codigo);
+    assert.equal((await S.carregarSala(s6.codigo)).missao.vencedor, beto.id, 'e volta depois de um reinício');
+    const s6b = S._interno.salas.get(s6.codigo), A6b = s6b.jogadores.get(ana.id), B6b = s6b.jogadores.get(beto.id);
+
+    // A7: oferta de troca aceita por quem tem o item
+    A6b.st.kit = ['corda']; A6b.st.pend = { tipo: 'troca' }; A6b.st.rolou = true; A6b.st.feito = false;
+    B6b.st.kit = ['mapa']; B6b.st.rolou = false; B6b.st.feito = false; B6b.st.pend = null;
+    const wa7 = falso(ana), wb7 = falso(beto);
+    await S.entrarNaSala(wa7, ana, s6.codigo); await S.entrarNaSala(wb7, beto, s6.codigo);
+    await S.agir(wa7, ana, { t: 'oferecer_troca', dar: 'corda', querer: 'mapa' });
+    const oferta = wb7.ultimo('estado').sala.ofertas[0];
+    assert.deepEqual([oferta.apelido, oferta.dar, oferta.querer, oferta.possoAceitar], ['Ana', 'corda', 'mapa', true]);
+    assert.equal(wa7.ultimo('estado').sala.ofertas.length, 0, 'quem ofereceu não vê a própria oferta na lista');
+    await S.agir(wb7, beto, { t: 'aceitar_troca', de: 99 });
+    assert.match(wb7.ultimo('erro').msg, /não existe/);
+    await S.agir(wb7, beto, { t: 'aceitar_troca', de: oferta.de });
+    await s6b.gravando;
+    assert.deepEqual(A6b.st.kit, ['mapa']);
+    assert.deepEqual(B6b.st.kit, ['corda']);
+    assert.equal(A6b.st.oferta, null);
+    assert.equal(wb7.ultimo('estado').sala.ofertas.length, 0);
+    const [dbA] = await rows('SELECT estado FROM participacoes WHERE id = $1', [A6b.partId]);
+    assert.deepEqual(dbA.estado.kit, ['mapa'], 'a troca fica gravada');
+    assert.ok(s6b.mural.some((m) => /fez uma troca na Feira/.test(m.texto)));
+    console.log('missão e trocas ok');
+  } finally {
+    for (const c of criadas4) await pool.query('DELETE FROM salas WHERE codigo = $1', [c]);
+  }
   console.log('INTEGRAÇÃO OK');
 } catch (e) {
   console.error(e);

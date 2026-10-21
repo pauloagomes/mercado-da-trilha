@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { pool, migrar } from './db.js';
 import * as S from './salas.js';
 import { limparApelido, apelidoProibido } from './apelido.js';
+import { rotasConta } from './conta.js';
 import * as E from '../public/js/engine.js';
 import { FICHAS, RODADAS_OPCOES, RODADAS_PADRAO, ACOES_DO_JOGO } from '../public/js/engine.js';
 
@@ -42,6 +43,13 @@ async function jogadorDoCookie(cookies) {
 
 const IDS_INSIGNIAS = new Set(E.INSIGNIAS.map((i) => i.id));
 const insigniasDe = async (id) => (await pool.query('SELECT insignia FROM insignias WHERE jogador_id = $1 ORDER BY ganha_em', [id])).rows.map((r) => r.insignia);
+
+// Troca o cookie do jogador por um novo (usado na recuperação por código).
+async function emitirCookie(reply, jogadorId) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  await pool.query('UPDATE jogadores SET token_hash = $2 WHERE id = $1', [jogadorId, hash(token)]);
+  reply.setCookie(COOKIE, token, { path: '/', httpOnly: true, sameSite: 'lax', secure: COOKIE_SEGURO, maxAge: 365 * 24 * 3600 });
+}
 
 app.get('/api/eu', async (req) => {
   const j = await jogadorDoCookie(req.cookies);
@@ -175,6 +183,8 @@ app.get('/api/desafio/ranking', async (req, reply) => {
   const meu = j ? (await pool.query('SELECT pontos FROM desafios_dia WHERE dia = $1 AND jogador_id = $2', [dia, j.id])).rows[0] : null;
   return { dia, hoje: diaSP(), total, top, jogou: !!meu };
 });
+
+rotasConta(app, { pool, jogadorDoCookie, emitirCookie, diaSP });
 
 app.get('/api/saude', async () => {
   await pool.query('SELECT 1');

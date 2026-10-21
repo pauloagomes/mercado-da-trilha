@@ -1,0 +1,26 @@
+// Lista de 256 palavras para o código de recuperação (6 palavras = 48 bits).
+// Palavras simples, sem acento, fáceis de ler e de copiar por uma criança.
+export const PALAVRAS = [
+  'onca', 'lobo', 'coruja', 'raposa', 'tucano', 'arara', 'macaco', 'tatu', 'capivara', 'jacare', 'gato', 'cachorro',
+  'cavalo', 'coelho', 'pato', 'ganso', 'galo', 'pombo', 'sapo', 'peixe', 'tubarao', 'baleia', 'golfinho', 'tartaruga',
+  'cobra', 'aranha', 'abelha', 'formiga', 'borboleta', 'grilo', 'vaca', 'porco', 'ovelha', 'cabra', 'urso', 'foca',
+  'pinguim', 'leao', 'tigre', 'zebra', 'girafa', 'camelo', 'gaivota', 'beijaflor', 'joaninha', 'caranguejo', 'estrela', 'polvo',
+  'rio', 'lago', 'mar', 'praia', 'ilha', 'monte', 'serra', 'vale', 'campo', 'mata', 'folha', 'flor',
+  'arvore', 'raiz', 'galho', 'fruto', 'semente', 'nuvem', 'chuva', 'vento', 'trovao', 'raio', 'sol', 'lua',
+  'cometa', 'planeta', 'ceu', 'terra', 'areia', 'pedra', 'barro', 'fogo', 'brasa', 'fumaca', 'neve', 'gelo',
+  'orvalho', 'cachoeira', 'lagoa', 'floresta', 'deserto', 'caverna', 'ponte', 'caminho', 'atalho', 'clareira', 'horizonte', 'aurora',
+  'barraca', 'corda', 'lona', 'panela', 'lanterna', 'mapa', 'bussola', 'trilha', 'fogueira', 'mochila', 'canivete', 'apito',
+  'bandeira', 'tenda', 'sino', 'machado', 'martelo', 'estaca', 'cantil', 'cobertor', 'colchao', 'tocha', 'remo', 'canoa',
+  'bola', 'pipa', 'carro', 'barco', 'aviao', 'trem', 'bicicleta', 'patins', 'livro', 'caderno', 'lapis', 'caneta',
+  'tinta', 'papel', 'cola', 'tesoura', 'regua', 'mesa', 'cadeira', 'janela', 'porta', 'chave', 'relogio', 'espelho',
+  'vela', 'cesta', 'balde', 'chapeu', 'bota', 'meia', 'luva', 'cinto', 'bolso', 'botao', 'linha', 'agulha',
+  'pao', 'bolo', 'leite', 'queijo', 'arroz', 'feijao', 'milho', 'mamao', 'banana', 'laranja', 'limao', 'manga',
+  'uva', 'melao', 'pera', 'coco', 'tomate', 'batata', 'cenoura', 'pizza', 'sorvete', 'biscoito', 'geleia', 'mel',
+  'azul', 'verde', 'amarelo', 'rosa', 'roxo', 'marrom', 'cinza', 'preto', 'branco', 'circulo', 'quadrado', 'ponta',
+  'feliz', 'forte', 'veloz', 'calmo', 'esperto', 'amigo', 'bravo', 'alegre', 'firme', 'claro', 'gentil', 'sabio',
+  'musica', 'danca', 'jogo', 'festa', 'sonho', 'cancao', 'historia', 'aventura', 'segredo', 'tesouro', 'missao', 'desafio',
+  'cavaleiro', 'pirata', 'palhaco', 'dragao', 'fada', 'gigante', 'robo', 'foguete',
+  'abacaxi', 'goiaba', 'caju', 'pitanga', 'jabuticaba', 'amora', 'acai', 'pipoca', 'tapioca', 'brigadeiro', 'trovador', 'mensageiro',
+  'guia', 'chefe', 'patrulha', 'tropa', 'lobinho', 'escoteiro', 'pioneiro', 'senior', 'alcateia', 'acampamento', 'carvalho', 'pinheiro',
+  'bambu', 'cacto', 'samambaia', 'orquidea', 'margarida', 'girassol', 'cigarra', 'vagalume',
+];

@@ -37,6 +37,8 @@ class Sala {
     this.anfitriao = r.anfitriao_id;
     this.rodadas = r.rodadas;
     this.semente = r.semente;
+    // F6: a missão sai da semente; só o vencedor precisa ficar gravado
+    this.missao = { id: E.missaoDaPartida(r.semente).id, vencedor: r.missao?.vencedor ?? null };
     this.pontes = r.pontes || {};  // casa do tabuleiro -> jogadorId do guardião
     this.cenas = [];               // o que aconteceu nas últimas jogadas, para os outros celulares animarem
     this.cenaN = 0;
@@ -109,7 +111,7 @@ function gravar(sala, ...ids) {
   const itens = [...new Set(ids)].map((id) => [id, sala.jogadores.get(id)]).filter(([, p]) => p)
     .map(([id, p]) => ({ id, p, st: p.st, saida: p.st.saida.splice(0), pontos: E.pontuacao(p.st).total }));
   if (!itens.length) return;
-  const pontes = JSON.stringify(sala.pontes);
+  const pontes = JSON.stringify(sala.pontes), missao = JSON.stringify(sala.missao);
   sala.gravando = sala.gravando.then(async () => {
     const c = await pool.connect();
     try {
@@ -130,7 +132,7 @@ function gravar(sala, ...ids) {
           }
         }
       }
-      await c.query('UPDATE salas SET pontes = $2 WHERE codigo = $1', [sala.codigo, pontes]);
+      await c.query('UPDATE salas SET pontes = $2, missao = $3 WHERE codigo = $1', [sala.codigo, pontes, missao]);
       await c.query('COMMIT');
     } catch (e) {
       await c.query('ROLLBACK').catch(() => {});
@@ -217,6 +219,12 @@ function infoSala(sala, paraId) {
     rodadaSync: sala.rodadaSync, fimRodadaEm: sala.fimRodadaEm, agora: Date.now(),
     souAnfitriao: sala.anfitriao === paraId,
     baseMs: RODADA_MS(),
+    missao: { nome: E.missaoPorId(sala.missao.id).nome, desc: E.descreverMissao(sala.missao), pts: E.MISSAO_PTS,
+      vencedor: sala.missao.vencedor ? sala.jogadores.get(sala.missao.vencedor)?.st.apelido || null : null },
+    ofertas: lista.filter((p) => p !== sala.jogadores.get(paraId) && E.ofertaAtiva(p.st)).map((p) => ({
+      de: p.ordem, apelido: p.st.apelido, dar: p.st.oferta.dar, querer: p.st.oferta.querer,
+      possoAceitar: sala.jogadores.has(paraId) && E.podeAceitar(sala.jogadores.get(paraId).st, p.st),
+    })),
     pendentes: sala.tipo === 'espera' && sala.status === 'em_jogo' && !sala.janela
       ? lista.filter((p) => !p.st.fim && !p.st.feito && p.st.rodada === sala.rodadaSync - 1).map((p) => p.st.apelido) : [],
     voto: sala.voto ? {
@@ -335,6 +343,8 @@ const ACOES = new Set(E.ACOES_DO_JOGO);
 // O motor da sala trabalha sobre os estados dos jogadores e as pontes da sala.
 function contexto(sala) {
   const ctx = E.novoContexto(sala.pontes);
+  ctx.missao = sala.missao;
+  ctx.ofertas = true; // A7: nas salas dá para oferecer troca aos outros jogadores
   for (const [id, p] of sala.jogadores) ctx.estados.set(id, p.st);
   return ctx;
 }
@@ -352,6 +362,8 @@ function recolherCenas(sala) {
       if (ev.t === 'fogo') anotarMural(sala, `${p.st.apelido} chegou ao Fogo de Conselho!`, p.cor);
       else if (ev.t === 'kit') anotarMural(sala, `${p.st.apelido} completou o Kit de Acampamento!`, p.cor);
       else if (ev.t === 'ponte') anotarMural(sala, `${p.st.apelido} assumiu a ponte.`, p.cor);
+      else if (ev.t === 'missao') anotarMural(sala, `${p.st.apelido} cumpriu a missão da sala primeiro: ${ev.nome} (+${E.MISSAO_PTS} pts).`, p.cor);
+      else if (ev.t === 'troca') anotarMural(sala, `${p.st.apelido} fez uma troca na Feira (${E.ITENS.find((i) => i.id === ev.dar).nome} por ${E.ITENS.find((i) => i.id === ev.querer).nome}).`, p.cor);
       else if (ev.t === 'carta') {
         const c = E.cartaPorId(p.st.resposta?.carta);
         if (c?.sala) anotarMural(sala, `${p.st.apelido} tirou a carta de sala "${c.titulo}".`, p.cor);
@@ -373,6 +385,11 @@ export async function agir(ws, jog, msg) {
   if (sala.janela) return enviar(ws, { t: 'erro', msg: 'Aguarde o fim da votação: a próxima rodada já abre.' });
   if (sala.tipo === 'espera' && st.rodada !== sala.rodadaSync - 1) {
     return enviar(ws, { t: 'erro', msg: 'Aguarde: a próxima rodada abre para todos juntos.' });
+  }
+  if (msg.t === 'aceitar_troca') {
+    const alvo = [...sala.jogadores].find(([, x]) => x.ordem === Number(msg.de));
+    if (!alvo) return enviar(ws, { t: 'erro', msg: 'Essa oferta não existe mais.' });
+    msg = { t: msg.t, de: alvo[0] };
   }
   const r = E.agirNaSala(contexto(sala), jog.id, msg);
   if (r.erro) return enviar(ws, { t: 'erro', msg: r.erro });
@@ -464,6 +481,7 @@ function fecharRodadaSync(sala) {
 function concluirRodadaSync(sala) {
   const tocados = new Set();
   for (const [id, p] of sala.jogadores) {
+    if (p.st.oferta) { p.st.oferta = null; tocados.add(id); } // A7: na sala de espera a oferta vale só na rodada
     if (p.st.fim || p.st.rodada !== sala.rodadaSync - 1) continue;
     E.fecharRodada(p.st);
     tocados.add(id);
