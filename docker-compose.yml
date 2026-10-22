@@ -26,6 +26,10 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-1}
       SERVIR_ESTATICOS: "0"
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Sem SMTP_URL não dá para criar a conta do responsável e só o jogo sozinho funciona.
+      SMTP_URL: ${SMTP_URL:-}
+      EMAIL_DE: ${EMAIL_DE:-}
+      SEGREDO_RECUPERACAO: ${SEGREDO_RECUPERACAO:-}
     # O log do app fica no Docker com tamanho limitado. Os registros de acesso com prazo são os do nginx.
     logging:
       driver: json-file
