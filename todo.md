@@ -7,18 +7,17 @@ Estado: as etapas 1 a 4 do RFC "Mercado da Trilha mais divertido e interativo" e
 - [ ] Trocar as 12 fichas provisórias pelas artes finais (mesmos nomes de arquivo, 256 px, sem flor-de-lis oficial nem logotipos).
 - [ ] Cenário do tabuleiro: regenerar o Dia com araucárias e fogueira apagada num modelo melhor e refazer Noite e Chuva por edição dele (prompts e passo a passo em `docs/arte/cenario.md`). A versão atual não tem araucárias e uma palmeira invade a clareira.
 - [x] Conferir a licença de uso comercial das imagens geradas pelo Higgsfield no plano usado: permitido em qualquer plano (seção 4.4 dos termos de 26/07/2026). Avaliação em `docs/arte/cenario.md`, seção "Direitos de uso".
-- [ ] Revisar as 36 cartas contra a carteira de evento real do Trilha HUB (recarga por Pix, saldo máximo, aviso no WhatsApp, extrato por link, pulseira com apelido, QR bloqueado pela chefia).
+- [ ] Revisar as 36 cartas com a chefia, contra os documentos da UEB: conferir cada fato (anos de 1907, 1908, 1910, 1924 e 1920, idades dos ramos, lemas, os 10 artigos da Lei, saudações, nomes dos nós e das técnicas) e avaliar se a dificuldade serve a cada ramo. Conferir também o nível de cada carta (12 de Lobinho, 15 de Escoteiro em diante e 9 de todos) e decidir se as cartas devem ganhar a arte de um personagem ou objeto (ver `ARTES_CARTAS` em `public/js/app.js`).
+- [ ] Decidir se o Trilha HUB volta a aparecer depois das cartas. Sem perguntas sobre o sistema, a linha "No Trilha HUB..." saiu das cartas e o link da tela da carta não aparece mais.
 - [ ] Teste com uma tropa real e ajuste do balanceamento a partir dele.
-- [ ] Conferir as metas de lançamento com `npm run simular` (hoje só o pagamento recusado fica fora: 18% contra 30% a 50%).
-- [ ] **Conta criada pelo responsável (bloqueia o lançamento).** A política (`PRIVACY.md`) diz que não guardamos dados de menores e que a conta é de um adulto, criada com o e-mail dele. Hoje `POST /api/eu` cria o jogador no servidor só com apelido e ficha, sem adulto nenhum. Falta:
-  - criar a conta a partir do e-mail confirmado por código (o fluxo de `server/conta.js` já existe, mas hoje é opcional e vem depois do apelido), com a declaração de que quem cria é maior de 18 anos e responsável pela criança;
-  - sem conta, só o jogo sozinho no aparelho: salas, desafio do dia, `/api/solo`, recordes e Minha trilha passam a exigir a conta;
-  - entrar de novo com o e-mail (código), além do código de 6 palavras;
-  - o quadro de recordes vira uma escolha do responsável, e não mais o motivo de informar o e-mail;
-  - atualizar a seção "E-mail do responsável e quadro de recordes" do README.
-- [ ] **Apagar a conta em Minha trilha** (o `ON DELETE CASCADE` de `jogadores` já leva partidas, insígnias, recuperação e e-mail) e trocar o e-mail. A política promete as duas coisas.
-- [ ] **Guardar os registros de acesso por 6 meses** (Marco Civil, art. 15), como a política diz: hoje o log do Fastify e do nginx vai para o log do Docker, sem prazo definido.
-- [ ] Publicar: confirmar o `TRILHAHUB_URL`, subir com `docker compose`, aplicar as migrações 002 a 005 (rodam sozinhas ao iniciar).
+- [ ] Conferir as metas de lançamento com `npm run simular`. Em 22/10/2026, duas ficam fora: pagamento recusado (17,8% contra 30% a 50%) e partidas sem nenhuma comemoração (0,2% contra 0%).
+- [x] **Conta criada pelo responsável.** O adulto entra ou cria a conta com o e-mail confirmado por código e a declaração de ter 18 anos ou mais (migração 006, `/api/conta/*`). Sem conta, só o jogo sozinho no aparelho. Entrar de novo pelo e-mail ou pelas 6 palavras; o quadro de recordes é escolha do responsável. README atualizado.
+- [x] **Apagar a conta e trocar o e-mail em Minha trilha**, e sair do aparelho.
+- [x] **Registros de acesso por 6 meses:** o nginx grava um arquivo por dia no volume `registros` e o serviço `registros` do docker-compose apaga os de mais de 6 meses. Confirmar no servidor depois de publicar.
+- [x] **Perfis, como num serviço de streaming:** até 6 por e-mail, um para cada criança (migração 007).
+- [x] **Apagar pontuação pede o código do e-mail:** perfil com partidas ou insígnias, ou a conta quando algum perfil tem (migração 008).
+- [x] **Vários aparelhos conectados:** cada aparelho tem a sua sessão. O mesmo perfil joga em um aparelho por vez: ao abrir as salas em outro, o anterior sai da sala sem sair da conta.
+- [ ] Publicar: confirmar o `TRILHAHUB_URL`, subir com `docker compose`, aplicar as migrações 002 a 009 (rodam sozinhas ao iniciar).
 
 ## Decisões em aberto
 
@@ -28,7 +27,7 @@ Estado: as etapas 1 a 4 do RFC "Mercado da Trilha mais divertido e interativo" e
 - [ ] Prazo de retenção dos dados: a política diz "enquanto a conta existir". Decidir se contas paradas há muito tempo são apagadas sozinhas (hoje não há limpeza automática de partidas, insígnias e histórico).
 - [x] Contato para dúvidas e pedidos de remoção: GitHub do projeto (Issue sem dado pessoal; pedido sobre uma conta passa para um canal privado).
 - [ ] Revisão jurídica da política de uso abaixo, principalmente por envolver crianças (LGPD).
-- [ ] Reduzir o cache dos arquivos estáticos (`maxAge: 1h`) ou versionar os arquivos: um cliente antigo com servidor novo pode falhar até o cache vencer.
+- [x] Cache dos arquivos estáticos: HTML, JS e CSS saem com `no-cache` (o navegador confere a versão a cada carga), no nginx e no Node; imagens ficam um dia.
 
 ## Abertura como projeto open source
 
@@ -38,8 +37,8 @@ Já existem `LICENSE` (MIT, Paulo Afonso Gomes Fernandes Consultoria em Tecnolog
 - [ ] Decidir a licença das fichas finais. O cenário, gerado por IA, foi para a MIT junto com o código (`docs/arte/cenario.md`, "Direitos de uso").
 - [x] Repositório público em https://github.com/pauloagomes/mercado-da-trilha desde 21/10/2026 (`main` e esta branch, PR #1). Antes de publicar, o histórico foi conferido: sem `.env`, segredos, IPs ou e-mails reais.
 - [ ] Traduções: o `CONTRIBUTING.md` aceita traduções, mas os textos da interface estão escritos direto no código, sem um sistema de tradução.
-- [ ] Opcional: modelos de Issue e de Pull Request em `.github/`, com os campos que o `CONTRIBUTING.md` pede.
-- [ ] **Regra contra rastreamento.** Escrever no `CONTRIBUTING.md` e no `PRIVACY.md` que o jogo não aceita nenhum meio de monitorar ou rastrear quem joga: ferramentas de análise de terceiros, pixels de anúncio, impressão digital do aparelho, gravação de sessão, localização ou envio de dados para fora do servidor do projeto. Pull Request que traga algo assim é recusado. Os contadores anônimos de `server/metricas.js` continuam permitidos, desde que não identifiquem ninguém.
+- [x] Modelos de Issue (erro e sugestão, com segurança e pedidos de conta fora das Issues públicas) e de Pull Request em `.github/`.
+- [x] **Regra contra rastreamento.** Escrito no `CONTRIBUTING.md` e no `PRIVACY.md` que o jogo não aceita nenhum meio de monitorar ou rastrear quem joga: ferramentas de análise de terceiros, pixels de anúncio, impressão digital do aparelho, gravação de sessão, localização ou envio de dados para fora do servidor do projeto. Pull Request que traga algo assim é recusado. Os contadores anônimos de `server/metricas.js` continuam permitidos, desde que não identifiquem ninguém.
 
 ## Política de uso
 

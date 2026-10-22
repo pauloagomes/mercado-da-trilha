@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as E from '../public/js/engine.js';
+import * as R from '../public/js/rivais.js';
 
 const seq = (...vals) => { let i = 0; return () => vals[i++ % vals.length]; };
 const dado = (n) => (n - 1) / 6 + 0.01; // valor do rng que faz o dado dar n
@@ -692,7 +693,7 @@ test('F5: toda carta tem texto curto de até 15 palavras, já com a pergunta', (
     assert.ok(c.curto.trim().endsWith('?'), `${c.id}: o texto curto termina na pergunta`);
     assert.ok(c.curto.length < c.historia.length + c.pergunta.length, `${c.id}: não é mais curto que o completo`);
   }
-  assert.equal(E.cartaMostrada({ seed: 3 }, 'vovo').curto, 'O vovô mandou 30 BC. E se a conta passar de 300 BC?');
+  assert.equal(E.cartaMostrada({ seed: 3 }, 'vovo').curto, 'Você ganhou 30 BC! Em que ano foi o primeiro acampamento escoteiro?');
 });
 
 test('F6: a missão da sala é igual para todos e quem cumpre primeiro leva 15 pts', () => {
@@ -736,4 +737,68 @@ test('cenário: chuva na rodada do evento Chuva, noite na reta final, dia no res
   assert.equal(E.climaDaRodada(st), 'noite');
   E.aplicarEventoAgora(st, 'chuva');
   assert.equal(E.climaDaRodada(st), 'chuva', 'a chuva do Mestre do mercado também molha o tabuleiro');
+});
+
+test('toda carta tem a frase do efeito para o rodapé da carta na tela', () => {
+  for (const c of [...E.CARTAS, ...E.CARTAS_SALA]) assert.ok(E.RESUMO_CARTA[c.id], c.id);
+  assert.equal(Object.keys(E.RESUMO_CARTA).length, E.CARTAS.length + E.CARTAS_SALA.length);
+});
+
+test('as cartas falam do Escotismo, nunca do sistema (Pix, extrato, carteira, WhatsApp...)', () => {
+  const sistema = /pix|extrato|whatsapp|pulseira|\bqr\b|carteira|saldo|pré-pago|aviso de gasto|trilha hub|recarga|estorno|cobrança|\bapp\b/i;
+  for (const c of [...E.CARTAS, ...E.CARTAS_SALA]) {
+    const textos = [c.titulo, c.historia, c.pergunta, c.porque, c.curto, ...c.opcoes];
+    for (const t of textos) assert.ok(!sistema.test(t), `${c.id}: "${t}"`);
+    assert.equal(c.app, undefined, `${c.id}: a linha "app" ligava a carta ao sistema`);
+  }
+});
+
+test('o jogo não mostra a linha do Trilha HUB depois das cartas (nenhuma carta tem "app")', () => {
+  assert.equal([...E.CARTAS, ...E.CARTAS_SALA].filter((c) => c.app).length, 0);
+});
+
+// ---------- Nível do perfil: Lobinho ou Escoteiro em diante ----------
+test('cada carta serve a um nível ou a todos, e todo nível tem baralho de sobra', () => {
+  const todas = [...E.CARTAS, ...E.CARTAS_SALA];
+  for (const c of todas) assert.ok(c.nivel === undefined || E.NIVEIS[c.nivel], `${c.id}: nível "${c.nivel}" desconhecido`);
+  const por = (n) => todas.filter((c) => c.nivel === n).length;
+  assert.equal(por('lobinho') + por('escoteiro') + todas.filter((c) => !c.nivel).length, 36);
+  assert.ok(por('lobinho') > 0 && por('escoteiro') > 0 && todas.some((c) => !c.nivel), 'os três grupos existem');
+  for (const nivel of Object.keys(E.NIVEIS)) {
+    const st = E.novoJogador({ apelido: 'Ana', ficha: 'f01', sala: true, nivel });
+    for (const tipo of ['bussola', 'tempestade']) {
+      assert.ok(st.baralho[tipo].length >= 10, `${nivel}/${tipo}: só ${st.baralho[tipo].length} cartas, uma partida repetiria carta`);
+    }
+  }
+});
+
+test('o baralho de cada nível só tem cartas do nível ou de todos, e sem nível vale o baralho inteiro', () => {
+  const ids = (st) => [...st.baralho.bussola, ...st.baralho.tempestade];
+  const lobinho = E.novoJogador({ apelido: 'L', ficha: 'f01', sala: true, nivel: 'lobinho', seed: 5 });
+  const escoteiro = E.novoJogador({ apelido: 'E', ficha: 'f01', sala: true, nivel: 'escoteiro', seed: 5 });
+  const sem = E.novoJogador({ apelido: 'S', ficha: 'f01', sala: true, seed: 5 });
+  for (const id of ids(lobinho)) assert.notEqual(E.cartaPorId(id).nivel, 'escoteiro', `${id} é de Escoteiro e saiu para um Lobinho`);
+  for (const id of ids(escoteiro)) assert.notEqual(E.cartaPorId(id).nivel, 'lobinho', `${id} é de Lobinho e saiu para um Escoteiro`);
+  assert.ok(ids(lobinho).includes('salarecusa'), 'a Fila na cantina sai para os Lobinhos');
+  assert.ok(!ids(escoteiro).includes('salarecusa'), 'e não sai para quem é Escoteiro em diante');
+  assert.equal(ids(sem).length, 36, 'sem nível, todas as cartas');
+  assert.equal(E.novoJogador({ apelido: 'X', ficha: 'f01', sala: true, nivel: 'inventado' }).nivel, undefined, 'nível desconhecido vale como nenhum');
+});
+
+test('o baralho do nível se refaz só com cartas do nível quando acaba', () => {
+  const st = E.novoJogador({ apelido: 'L', ficha: 'f01', sala: true, nivel: 'lobinho', seed: 9 });
+  assert.ok(E.baralho(st, 'tempestade').every((c) => c.nivel !== 'escoteiro'));
+  assert.ok(E.baralho(st, 'bussola').every((c) => c.nivel !== 'escoteiro'));
+});
+
+test('o desafio do dia é o mesmo para todos: não depende de nível', () => {
+  const a = E.novoDesafio('2026-10-22', { apelido: 'A', ficha: 'f01' }).estados.get('eu');
+  const b = E.novoDesafio('2026-10-22', { apelido: 'B', ficha: 'f02' }).estados.get('eu');
+  assert.equal(a.nivel, undefined);
+  assert.deepEqual(a.baralho, b.baralho);
+});
+
+test('no jogo sozinho todos na mesa jogam no nível do perfil', () => {
+  const ctx = R.novoJogoSolo({ apelido: 'Ana', ficha: 'f01', rodadas: 8, seed: 3, nivel: 'lobinho' });
+  for (const st of ctx.estados.values()) assert.equal(st.nivel, 'lobinho');
 });

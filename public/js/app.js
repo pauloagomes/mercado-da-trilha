@@ -23,6 +23,12 @@ const fichaSrc = (id) => `img/fichas/${encodeURIComponent(id || 'f01')}.svg`;
 const fichaNome = (id) => E.FICHAS.find((f) => f.id === id)?.nome || 'Ficha';
 const bc = (v) => `<span class="bc">${v} BC</span>`;
 const reduzir = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Lobinhos leem o texto curto das cartas, com um adulto; do nível Escoteiro em diante, o texto completo.
+const leituraCurta = () => S.perfil.nivel === 'lobinho';
+const NIVEL_DESC = { lobinho: 'Cartas simples e texto curto, para ler com um adulto', escoteiro: 'Todas as cartas, com o texto completo' };
+// Escolha do nível: dois botões; `attr` é o atributo que cada botão carrega (ex.: data-nivel).
+const nivelHtml = (atual, attr) => `<div class="nivel-op" role="radiogroup" aria-label="Nível">${Object.entries(E.NIVEIS).map(([k, nome]) =>
+  `<button type="button" class="nivel-btn" role="radio" aria-checked="${atual === k}" ${attr}="${k}"><b>${nome}</b><span>${NIVEL_DESC[k]}</span></button>`).join('')}</div>`;
 const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
 const linkHub = (slot, texto) => `<a href="/r/${slot}" target="_blank" rel="noopener">${texto}</a>`;
 
@@ -62,9 +68,12 @@ const seloHtml = (id, off = false) => {
 
 const S = {
   tela: 'entrada',
-  perfil: ls.get('mt-perfil', { apelido: '', ficha: 'f01' }),
+  // O nível do perfil (Lobinho ou Escoteiro em diante) define as cartas e a leitura. Quem usava a leitura curta antes
+  // continua como Lobinho. O padrão é Escoteiro em diante.
+  perfil: { apelido: '', ficha: 'f01', nivel: ls.get('mt-leitura', 'completa') === 'curta' ? 'lobinho' : E.NIVEL_PADRAO, ...ls.get('mt-perfil', {}) },
   rodadas: ls.get('mt-rodadas', E.RODADAS_PADRAO),
-  online: false, registrado: false,
+  online: false, registrado: false,   // registrado: há um perfil escolhido neste aparelho, dentro de uma conta
+  temConta: false, perfilId: null, perfis: [], maxPerfis: 6,
   modo: null,            // 'solo' | 'sala'
   solo: null,            // estado do motor no jogo solo (o que se vê é S.eu, uma cópia)
   sala: null, eu: null, placar: [], mural: [], fila: null, pontes: {},
@@ -75,7 +84,7 @@ const S = {
   som: ls.get('mt-som', true), musica: ls.get('mt-musica', true), reacaoLivreEm: 0,
   insignias: Object.keys(ls.get('mt-insignias', {})),   // todas as que o jogador já ganhou (aparelho + servidor)
   resultado: null, trilha: null, ranking: null, soloSala: false,
-  troca: {}, missaoSolo: null, leitura: ls.get('mt-leitura', 'completa'),   // leitura: 'completa' ou 'curta' (Lobinhos)
+  troca: {}, missaoSolo: null,
   setas: {}, delta: {},  // C5: quem subiu ou desceu no placar e os pontos ganhos na última jogada
 };
 
@@ -118,6 +127,8 @@ function ruido(dur, { vol = 0.08, atraso = 0, filtro = 1800 } = {}) {
   src.connect(f).connect(g).connect(a.destination); src.start(a.currentTime + atraso);
 }
 const SONS = {
+  porta: () => { tom(140, 0.35, { tipo: 'sawtooth', vol: 0.025, ate: 95 }); ruido(0.18, { vol: 0.03, filtro: 700, atraso: 0.05 }); tom(1320, 0.18, { tipo: 'sine', vol: 0.03, atraso: 0.35 }); },
+  virar: () => { ruido(0.09, { vol: 0.05, filtro: 2600 }); tom(880, 0.12, { tipo: 'triangle', vol: 0.03, atraso: 0.08 }); },
   clique: () => tom(680, 0.04, { tipo: 'sine', vol: 0.035 }),
   dado: () => { for (let i = 0; i < 5; i++) ruido(0.05, { atraso: i * 0.1, vol: 0.07, filtro: 900 + i * 300 }); },
   passo: () => tom(520, 0.05, { tipo: 'triangle', vol: 0.05 }),
@@ -208,9 +219,10 @@ async function iniciar() {
   try {
     const r = await api('/api/eu');
     S.online = true;
+    S.emailLigado = !!r.config?.emailLigado;
+    S.temConta = !!r.conta;
     if (r.jogador) {
-      S.registrado = true;
-      if (!S.perfil.apelido) S.perfil = { ...r.jogador };
+      trocarDePerfil(r.perfilId, r.jogador);
       mesclarInsignias(r.insignias || []);
     }
     enviarPendentes();
@@ -219,16 +231,38 @@ async function iniciar() {
     const sala = ls.get('mt-sala', null);
     if (sala && S.registrado) { S.modo = 'sala'; S.tela = 'jogo'; S.cenasN = null; await conectar(); enviar({ t: 'entrar', codigo: sala }); }
   } catch { S.online = false; }
+  if (S.temConta && !S.registrado && S.tela === 'entrada') { abrirPerfis(); return; }   // conta sem perfil escolhido aqui
   render();
 }
 
+// O perfil que joga neste aparelho. O que o aparelho guarda de insígnias, recordes e histórico é de um
+// perfil só: ao trocar de perfil, isso é esquecido aqui (a conta guarda tudo no servidor).
+function trocarDePerfil(id, jogador) {
+  const antes = ls.get('mt-perfil-id', null);
+  if (antes && id && antes !== id) {
+    for (const k of ['mt-insignias', 'mt-recorde', 'mt-recorde-desafio', 'mt-historico']) ls.del(k);
+    S.insignias = []; S.ranking = null;
+  }
+  S.perfilId = id; S.registrado = !!id;
+  if (id) ls.set('mt-perfil-id', id);
+  if (jogador) { S.perfil = { ...S.perfil, apelido: jogador.apelido, ficha: jogador.ficha, nivel: jogador.nivel || S.perfil.nivel }; ls.set('mt-perfil', S.perfil); }
+}
+// Resposta das rotas da conta (entrar, perfis, recuperar): conta, perfis e o perfil escolhido neste aparelho.
+function aplicarConta(r) {
+  S.temConta = true; S.perfis = r.perfis || []; S.maxPerfis = r.maxPerfis || 6;
+  trocarDePerfil(r.perfil?.id || null, r.perfil);
+  if (r.perfil) mesclarInsignias(r.insignias || []);
+}
+// Algo que precisa da conta: sem conta, a tela da conta; com conta mas sem perfil, a escolha de perfil.
+const pedirConta = () => (S.temConta ? abrirPerfis(true) : abrirConta(true));
+
+// Leva o apelido, a ficha e o nível escolhidos na tela para a conta. A conta em si só o responsável cria, com o e-mail.
 async function registrar() {
   const apelido = S.perfil.apelido.trim();
   if (apelido.length < 2) throw new Error('Escreva um apelido com pelo menos 2 letras.');
   ls.set('mt-perfil', S.perfil);
-  if (!S.online) return;
-  await api('/api/eu', { apelido, ficha: S.perfil.ficha });
-  S.registrado = true;
+  if (!S.online || !S.registrado) return;
+  await api('/api/eu', { apelido, ficha: S.perfil.ficha, nivel: S.perfil.nivel });
 }
 
 let ws = null, tentativas = 0, jaConectou = false;
@@ -269,6 +303,10 @@ function receber(m) {
   } else if (m.t === 'fila') {
     S.fila = m; S.offset = m.agora - Date.now();
     if (S.tela === 'fila') render();
+  } else if (m.t === 'outro_aparelho') {
+    // O mesmo perfil abriu as salas em outro aparelho: este sai da sala ou da fila, mas continua na conta.
+    S.modo = null; S.sala = null; S.fila = null; S.eu = null; S.placar = []; S.peaoPos = {}; ls.del('mt-sala');
+    toast(m.msg); ir('entrada');
   } else if (m.t === 'fila_saiu') {
     toast(m.msg); S.fila = null; ir('entrada');
   } else if (m.t === 'erro') {
@@ -325,6 +363,214 @@ async function aplicar(m, animar) {
   if (S.modo === 'solo' && m.eu?.fim && S.tela === 'jogo') setTimeout(() => ir('resultado'), 900);
   S.erro = ''; S.aguardando = false;
   render();
+  verCartaSorteada();
+  verLojaAberta();
+}
+
+// ---------- Loja: a barraca abre as portas na frente do tabuleiro, com os itens nas prateleiras ----------
+// O carrinho é o mesmo do painel: marcar um item aqui marca lá, e pagar ou sair usa as mesmas ações.
+let lojaVista = null;   // a última parada em loja que já abriu a barraca (não reabre sozinha depois de fechada)
+function verLojaAberta() {
+  const st = S.eu, ov = $('#lojaPalco');
+  const loja = S.tela === 'jogo' && st?.pend?.tipo === 'loja' ? st.pend.loja : null;
+  if (!loja) { if (ov) fecharLojaGrande(ov); return; }
+  const chave = `${S.modo}:${E.rodadaAtual(st)}:${loja}:${st.pos}`;
+  if (chave === lojaVista) { atualizarLojaGrande(); return; }
+  lojaVista = chave;
+  abrirLojaGrande(loja);
+}
+
+async function abrirLojaGrande(loja, animar = true) {
+  $('#lojaPalco')?.remove();
+  const casa = E.CASAS[loja];
+  const ov = document.createElement('div');
+  ov.id = 'lojaPalco'; ov.className = 'lj-palco'; ov.dataset.loja = loja;
+  ov.style.setProperty('--t', `var(--c-${loja})`);
+  ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', casa.nome);
+  ov.innerHTML = `<div class="lj-barraca">
+      <div class="lj-toldo" aria-hidden="true"></div>
+      <div class="lj-placa">${ic(loja)}<span>${esc(casa.nome)}</span></div>
+      <div class="lj-fachada">
+        <div class="lj-dentro"><span class="lj-luz" aria-hidden="true"></span><div class="lj-prateleira" id="ljItens"></div></div>
+        <div class="lj-porta esq" aria-hidden="true"><i class="lj-janela"></i><i class="lj-macaneta"></i></div>
+        <div class="lj-porta dir" aria-hidden="true"><i class="lj-janela"></i><i class="lj-macaneta"></i></div>
+      </div>
+      <div class="lj-balcao" id="ljBalcao"></div>
+    </div>`;
+  document.body.appendChild(ov);
+  const fechar = () => { ov.remove(); document.removeEventListener('keydown', tecla); };
+  const tecla = (e) => { if (e.key === 'Escape') fechar(); };
+  document.addEventListener('keydown', tecla);
+  ov.fechar = fechar;
+  atualizarLojaGrande();
+  if (!animar || reduzir) { ov.classList.add('aberta', 'pronta'); return; }
+  await sleep(450);
+  if (!ov.isConnected) return;
+  som('porta');
+  ov.classList.add('aberta');
+  await sleep(750);
+  if (ov.isConnected) { ov.classList.add('pronta'); ov.querySelector('.lj-item:not(:disabled)')?.focus(); }
+}
+
+// Prateleira e balcão, a partir do estado e do carrinho (chamado também quando o painel muda).
+function atualizarLojaGrande() {
+  const ov = $('#lojaPalco'), st = S.eu;
+  if (!ov || st?.pend?.tipo !== 'loja' || st.pend.loja !== ov.dataset.loja) return;
+  const loja = st.pend.loja, itens = E.ITENS.filter((i) => i.loja === loja);
+  const sel = Object.keys(S.carrinho).filter((id) => S.carrinho[id]);
+  const { total } = E.totalCompra(st, sel);
+  const feira = E.descontoFeira(st, loja), trava = S.aguardando ? 'disabled' : '';
+  $('#ljItens').innerHTML = itens.map((i) => {
+    const tem = st.kit.includes(i.id), pr = E.precoItem(st, i), marcado = !!S.carrinho[i.id];
+    return `<button class="lj-item${tem ? ' tem' : ''}${marcado ? ' marcado' : ''}" data-lj-item="${i.id}" aria-pressed="${marcado}" ${tem ? 'disabled' : trava}>
+      <span class="lj-ico">${ITEM_IC[i.id] || ic(loja)}</span>
+      <span class="lj-nome">${esc(i.nome)}</span>
+      <span class="lj-preco">${pr !== i.preco ? `<s>${i.preco}</s> ` : ''}${pr} BC</span>
+      ${tem ? '<span class="lj-selo">No kit</span>' : marcado ? '<span class="lj-check" aria-hidden="true">✓</span>' : ''}
+    </button>`;
+  }).join('');
+  const avisos = [
+    feira ? `<p class="lj-aviso ok">Feira! ${feira} BC de desconto em cada item.</p>` : '',
+    st.desconto ? `<p class="lj-aviso ok">Promoção: ${st.desconto} BC de desconto nesta compra.</p>` : '',
+    st.extra ? `<p class="lj-aviso alerta">O lojista está distraído: a compra vai custar ${st.extra} BC a mais. Confira o aviso de gasto.</p>` : '',
+    S.erro ? `<p class="lj-aviso erro">${esc(S.erro)}</p>` : '',
+  ].join('');
+  $('#ljBalcao').innerHTML = `${avisos}
+    <div class="lj-total"><span>Saldo ${st.saldo} BC</span><b>Total ${total} BC</b></div>
+    <div class="lj-botoes"><button class="btn primary" id="ljPagar" ${sel.length && !S.aguardando ? '' : 'disabled'}>Pagar ${total} BC</button>
+      <button class="btn" id="ljSair" ${trava}>Sair sem comprar</button><button class="btn sm lj-painel" id="ljPainel">Ver no painel</button></div>`;
+  ov.querySelectorAll('[data-lj-item]').forEach((b) => b.addEventListener('click', () => {
+    S.carrinho[b.dataset.ljItem] = !S.carrinho[b.dataset.ljItem]; S.erro = '';
+    atualizarPainel();
+    $(`[data-lj-item="${b.dataset.ljItem}"]`)?.focus();
+  }));
+  $('#ljPagar').addEventListener('click', () => acao('comprar', { itens: Object.keys(S.carrinho).filter((k) => S.carrinho[k]) }));
+  $('#ljSair').addEventListener('click', () => acao('sair_loja'));
+  $('#ljPainel').addEventListener('click', () => ov.fechar());
+}
+
+// Comprou ou saiu: as portas fecham e a barraca some.
+async function fecharLojaGrande(ov) {
+  if (ov.dataset.fechando) return;
+  ov.dataset.fechando = '1';
+  ov.classList.remove('pronta', 'aberta');
+  ov.classList.add('saindo');
+  await sleep(reduzir ? 0 : 650);
+  ov.fechar?.();
+}
+
+// ---------- Carta sorteada: chega na frente do tabuleiro de costas, gira e mostra a frente ----------
+// A janela de arte guarda o espaço da imagem de um personagem ou objeto. Para pôr a arte de uma carta,
+// salve public/img/cartas/<id da carta>.webp (4:3) e inclua o id aqui.
+const ARTES_CARTAS = new Set([]);
+let cartaVista = null;   // a última carta sorteada que já apareceu (não reabre depois de fechada)
+
+function verCartaSorteada() {
+  const st = S.eu, ov = $('#cartaPalco');
+  const id = S.tela === 'jogo' && st?.pend?.tipo === 'carta' ? st.pend.carta : null;
+  if (!id) {
+    // respondeu: a carta grande mostra o resultado, se ainda estiver aberta
+    if (ov && st?.resposta?.carta === ov.dataset.id) resultadoNaCarta(st);
+    else if (ov && S.tela !== 'jogo') ov.remove();
+    return;
+  }
+  const chave = `${S.modo}:${E.rodadaAtual(st)}:${id}`;
+  if (chave === cartaVista) return;
+  cartaVista = chave;
+  abrirCartaGrande(st, id);
+}
+
+const ICONE_PERGUNTA = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9a3 3 0 1 1 4.2 2.7c-.8.4-1.2 1-1.2 1.8V15M12 18.5v.5"/></svg>';
+function cenaDaCarta(c) {
+  const t = c.tipo === 'tempestade', g = `ccg-${c.id}`;
+  const ceu = t ? ['#3A2F6B', '#8C7BC9'] : ['#2B6FA3', '#9CCBEA'];
+  return `<svg class="cc-cena" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <defs><linearGradient id="${g}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${ceu[0]}"/><stop offset="1" stop-color="${ceu[1]}"/></linearGradient></defs>
+    <rect width="160" height="120" fill="url(#${g})"/>
+    ${t ? '<g fill="#5E5482"><ellipse cx="50" cy="28" rx="34" ry="12"/><ellipse cx="80" cy="22" rx="30" ry="13"/><ellipse cx="112" cy="30" rx="32" ry="11"/></g><path d="M86 34 l-8 16 h9 l-7 16" stroke="#FFE27A" stroke-width="3" fill="none" stroke-linejoin="round"/>'
+      : '<circle cx="124" cy="30" r="14" fill="#FFE08A"/><circle cx="124" cy="30" r="22" fill="#FFE08A" opacity=".25"/>'}
+    <path d="M0 86 L30 58 L52 78 L80 50 L108 76 L132 56 L160 78 L160 120 L0 120Z" fill="${t ? '#3E3A5A' : '#2E5939'}"/>
+    <path d="M0 100 Q40 84 80 98 T160 94 L160 120 L0 120Z" fill="${t ? '#2C2944' : '#3B6E47'}"/>
+    <g fill="${t ? '#1F1D33' : '#21412B'}"><path d="M18 104 l9 -22 l9 22z"/><path d="M128 102 l8 -20 l8 20z"/><path d="M142 106 l6 -15 l6 15z"/></g>
+  </svg>`;
+}
+function frenteDaCarta(c) {
+  const curta = leituraCurta() && c.curto;
+  const arte = ARTES_CARTAS.has(c.id) ? `<img src="img/cartas/${encodeURIComponent(c.id)}.webp" alt="">` : `${cenaDaCarta(c)}<span class="cc-emblema">${ic(c.tipo)}</span>`;
+  return `<div class="cc" data-tipo="${c.tipo}">
+    ${c.sala ? '<span class="cc-sala">Vale para a sala toda</span>' : ''}
+    <div class="cc-miolo">
+      <div class="cc-cab"><span class="cc-nome">${esc(c.titulo)}</span><span class="cc-pts"><small>+</small>${E.PTS_CARTA} <small>pts</small></span><span class="cc-selo">${ic(c.tipo)}</span></div>
+      <div class="cc-arte">${arte}</div>
+      <span class="cc-faixa">${c.tipo === 'tempestade' ? 'Carta de revés · Tempestade' : 'Carta de sorte · Bússola'}</span>
+      <div class="cc-texto">${curta ? `<p class="cc-curto">${esc(c.curto)}</p>` : `<p>${esc(c.historia)}</p><div class="cc-pergunta"><span class="cc-bola">${ICONE_PERGUNTA}</span><b>${esc(c.pergunta)}</b></div>`}</div>
+      <div class="cc-rodape">
+        <span>No jogo<b>${esc(c.resumo)}</b></span>
+        <span>Acertou<b>${c.tipo === 'tempestade' ? 'Escapa do revés' : `+${E.PTS_CARTA} pts`}${c.sala ? ` · +${E.GANHO_CARTA_SALA} BC para quem tirou` : ''}</b></span>
+      </div>
+    </div>
+  </div>`;
+}
+const VERSO_DA_CARTA = `<div class="cc-verso"><div class="cc-miolo">
+  <svg class="cc-rosa" viewBox="0 0 100 100" aria-hidden="true">
+    <circle cx="50" cy="50" r="46" fill="none" stroke="#F3D27A" stroke-width="2"/><circle cx="50" cy="50" r="38" fill="none" stroke="#F3D27A" stroke-width="1" stroke-dasharray="2 4"/>
+    <path d="M50 6 L57 43 L94 50 L57 57 L50 94 L43 57 L6 50 L43 43Z" fill="#F3D27A" opacity=".9"/><path d="M50 22 L54 46 L78 50 L54 54 L50 78 L46 54 L22 50 L46 46Z" fill="#1C3A26"/>
+    <circle cx="50" cy="50" r="12" fill="#D9A62E" stroke="#1C3A26" stroke-width="2"/>
+    <text x="50" y="54.5" text-anchor="middle" font-family="Rockwell, Roboto Slab, Georgia, serif" font-weight="800" font-size="12" fill="#1C3A26">BC</text>
+  </svg>
+  <div class="cc-marca">Mercado<br>da <span>Trilha</span></div><div class="cc-sub">Bússola · Tempestade</div>
+</div></div>`;
+
+async function abrirCartaGrande(st, id) {
+  $('#cartaPalco')?.remove();
+  const c = E.cartaMostrada(st, id);
+  const ov = document.createElement('div');
+  ov.id = 'cartaPalco'; ov.className = 'cc-palco'; ov.dataset.id = id;
+  ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', `Carta ${c.titulo}`);
+  ov.innerHTML = `<div class="cc-voo"><div class="cc-giro"><div class="cc-lado">${VERSO_DA_CARTA}</div><div class="cc-lado cc-frente">${frenteDaCarta(c)}</div></div></div>
+    <div class="cc-respostas"></div>`;
+  document.body.appendChild(ov);
+  const fechar = () => { ov.remove(); document.removeEventListener('keydown', tecla); };
+  const tecla = (e) => { if (e.key === 'Escape') fechar(); };
+  document.addEventListener('keydown', tecla);
+  ov.fechar = fechar;
+  await sleep(reduzir ? 0 : 900);
+  if (!ov.isConnected) return;
+  som('virar');
+  ov.querySelector('.cc-voo').classList.add('virada');
+  await sleep(reduzir ? 0 : 800);
+  if (!ov.isConnected || ov.dataset.respondida) return;
+  const r = ov.querySelector('.cc-respostas');
+  r.innerHTML = c.opcoes.map((o, i) => `<button class="cc-op" data-cc-resp="${i}">${'ABCD'[i]}. ${esc(o)}</button>`).join('');
+  ov.classList.add('pronta');
+  r.querySelectorAll('[data-cc-resp]').forEach((b) => b.addEventListener('click', () => {
+    if (S.aguardando) return;
+    ov.dataset.escolha = b.dataset.ccResp;
+    r.querySelectorAll('[data-cc-resp]').forEach((x) => { x.disabled = true; });
+    b.classList.add('escolhida');
+    acao('responder', { i: Number(b.dataset.ccResp) });
+  }));
+  r.querySelector('.cc-op')?.focus();
+}
+
+// Depois de responder: certa e errada nas opções, o porquê e um botão para seguir.
+function resultadoNaCarta(st) {
+  const ov = $('#cartaPalco');
+  if (!ov || ov.dataset.respondida) return;
+  ov.dataset.respondida = '1';
+  const c = E.cartaMostrada(st, st.resposta.carta), r = ov.querySelector('.cc-respostas');
+  if (!r.querySelector('[data-cc-resp]')) { ov.fechar?.(); return; }   // respondeu pelo painel antes do giro acabar
+  r.querySelectorAll('[data-cc-resp]').forEach((b) => {
+    b.disabled = true;
+    const k = Number(b.dataset.ccResp);
+    if (k === c.certa) b.classList.add('certa');
+    else if (String(k) === ov.dataset.escolha || k === st.resposta.escolha) b.classList.add('errada');
+  });
+  const titulo = st.resposta.ok ? `Acertou! +${E.PTS_CARTA} pts.${st.resposta.evitou ? ' Você evitou o revés.' : ''}` : 'Não foi dessa vez.';
+  r.insertAdjacentHTML('beforeend', `<div class="cc-resultado ${st.resposta.ok ? 'ok' : ''}"><b>${titulo}</b> ${esc(c.porque)}</div>
+    <div class="cc-fim"><button class="btn primary cc-seguir">Continuar</button></div>`);
+  r.querySelector('.cc-seguir').addEventListener('click', () => ov.fechar());
+  r.querySelector('.cc-seguir').focus();
 }
 
 // C5: setas de subida e descida, "+N pts" da última jogada e aviso de "Virada!" quando o líder muda.
@@ -720,12 +966,12 @@ function mesclarInsignias(ids) {
 let enviando = false;
 async function enviarPendentes() {
   const fila = ls.get('mt-envios', []);
-  if (enviando || !fila.length || !S.online) return;
+  if (enviando || !fila.length || !S.online || !S.registrado) return;
   enviando = true;
   try {
-    if (!S.registrado) await registrar();
     const resto = [];
     for (const it of fila) {
+      if (it.perfil && it.perfil !== S.perfilId) { resto.push(it); continue; }   // é de outro perfil: espera ele
       try {
         const r = await fetch(it.tipo === 'solo' ? '/api/solo' : '/api/desafio', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(it.corpo) });
         if (r.status >= 500) resto.push(it);
@@ -733,12 +979,12 @@ async function enviarPendentes() {
       } catch { resto.push(it); }
     }
     ls.set('mt-envios', resto);
-  } catch { /* sem apelido ou sem rede: fica na fila */ } finally { enviando = false; }
+  } catch { /* sem rede: fica na fila */ } finally { enviando = false; }
 }
 addEventListener('online', () => { S.online = true; enviarPendentes(); enviarContador(); });
 
 async function carregarRanking() {
-  if (!S.online) return;
+  if (!S.online || !S.registrado) return;
   try { S.ranking = await api(`/api/desafio/ranking?dia=${diaSP()}`); if (S.tela === 'entrada' || S.tela === 'resultado') render(); } catch { /* sem placar do dia */ }
 }
 
@@ -758,8 +1004,8 @@ function coletarCenas(ctx) {
 }
 
 function salvarSolo() {
-  const { modo, uuid: id, dia, acoes, treino, ctx } = S.solo;
-  ls.set('mt-solo', { v: E.VERSAO_ESTADO, modo, uuid: id, dia, acoes, treino, pontes: ctx.pontes, missao: ctx.missao, estados: Object.fromEntries(ctx.estados) });
+  const { modo, uuid: id, dia, acoes, treino, ctx, perfil } = S.solo;
+  ls.set('mt-solo', { v: E.VERSAO_ESTADO, modo, uuid: id, dia, acoes, treino, perfil, pontes: ctx.pontes, missao: ctx.missao, estados: Object.fromEntries(ctx.estados) });
 }
 function carregarSolo() {
   const d = ls.get('mt-solo', null);
@@ -767,7 +1013,7 @@ function carregarSolo() {
   const ctx = E.novoContexto(d.modo === 'solo' ? d.pontes || {} : null);
   if (d.modo === 'solo') ctx.missao = d.missao || E.missaoDaPartida(d.estados.eu.seed);
   for (const [id, st] of Object.entries(d.estados)) { st.saida = []; st.cena = []; ctx.estados.set(id, st); }
-  return { modo: d.modo, uuid: d.uuid, dia: d.dia, acoes: d.acoes || [], treino: !!d.treino, ctx };
+  return { modo: d.modo, uuid: d.uuid, dia: d.dia, acoes: d.acoes || [], treino: !!d.treino, perfil: d.perfil || null, ctx };
 }
 
 // No jogo sozinho o motor roda aqui; a tela recebe uma cópia, no mesmo formato que o servidor manda.
@@ -831,9 +1077,10 @@ function finalizarSolo() {
   ls.set('mt-historico', [{ modo, pontos: pts, saldo: st.saldo, quando: new Date().toISOString() }, ...ls.get('mt-historico', [])].slice(0, 20));
   ls.set('mt-vistas', [...ls.get('mt-vistas', []), ...st.sacadas].slice(-24));
   ls.del('mt-solo');
+  // Sem conta, a partida fica só no aparelho: nada vai para o servidor além do contador anônimo.
   const fila = ls.get('mt-envios', []);
-  if (modo === 'solo') fila.push({ tipo: 'solo', corpo: { id, pontos: pts, saldo: st.saldo, acertos: st.acertos, kit: st.kit.length, rodadas: st.rodadas, posicao: pos, insignias: novas } });
-  else if (!treino) { ls.set(`mt-desafio-${dia}`, { pontos: pts }); fila.push({ tipo: 'desafio', corpo: { dia, acoes } }); }
+  if (modo === 'solo') { if (S.registrado) fila.push({ tipo: 'solo', perfil: S.perfilId, corpo: { id, pontos: pts, saldo: st.saldo, acertos: st.acertos, kit: st.kit.length, rodadas: st.rodadas, posicao: pos, insignias: novas } }); }
+  else if (!treino) { ls.set(chaveDesafio(dia), { pontos: pts }); if (S.registrado) fila.push({ tipo: 'desafio', perfil: S.perfilId, corpo: { dia, acoes } }); }
   ls.set('mt-envios', fila);
   contar('fim');
   enviarPendentes().then(() => { if (modo === 'desafio') carregarRanking(); });
@@ -849,35 +1096,41 @@ async function jogarSozinho(continuar, modo = 'solo') {
     const apelido = S.perfil.apelido.trim(), ficha = S.perfil.ficha;
     if (modo === 'desafio') {
       const dia = diaSP();
-      salvo = { modo, uuid: uuid(), dia, acoes: [], treino: !!ls.get(`mt-desafio-${dia}`, null), ctx: E.novoDesafio(dia, { apelido, ficha }) };
+      salvo = { modo, uuid: uuid(), dia, acoes: [], treino: !!ls.get(chaveDesafio(dia), null), ctx: E.novoDesafio(dia, { apelido, ficha }) };
     } else {
-      salvo = { modo, uuid: uuid(), acoes: [], ctx: R.novoJogoSolo({ apelido, ficha, rodadas: S.rodadas, seed: Math.floor(Math.random() * 2 ** 31), vistas: ls.get('mt-vistas', []) }) };
+      salvo = { modo, uuid: uuid(), acoes: [], ctx: R.novoJogoSolo({ apelido, ficha, rodadas: S.rodadas, seed: Math.floor(Math.random() * 2 ** 31), vistas: ls.get('mt-vistas', []), nivel: S.perfil.nivel }) };
     }
   }
+  salvo.perfil ??= S.perfilId;
   S.solo = salvo; salvarSolo();
   S.cenasN = null; S.aguardando = false; S.peaoPos = {}; S.resultado = null; S.confetou = false; S.setas = {}; S.delta = {}; S.placar = []; pendentes.length = 0;
   S.eu = null;
   publicarSolo();
   ir('jogo');
 }
-const jogarDesafio = () => jogarSozinho(false, 'desafio');
+// Cada perfil tem a sua primeira tentativa do desafio do dia.
+const chaveDesafio = (dia) => (S.perfilId ? `mt-desafio-${dia}-${S.perfilId}` : `mt-desafio-${dia}`);
+const jogarDesafio = () => (S.registrado ? jogarSozinho(false, 'desafio') : pedirConta());
 async function registrarLocal() {
   const a = S.perfil.apelido.trim();
   if (a.length < 2) throw new Error('Escreva um apelido com pelo menos 2 letras.');
   ls.set('mt-perfil', S.perfil); ls.set('mt-rodadas', S.rodadas);
 }
 
+// Salas e fila: precisam de conexão e da conta do responsável. Sem conta, abre a tela da conta e devolve false.
 async function preparoOnline() {
   if (!S.online) throw new Error('Salas indisponíveis: sem conexão com o servidor. Você pode jogar sozinho.');
   await registrarLocal();
+  if (!S.registrado) { pedirConta(); return false; }
   await registrar();
   await conectar();
+  return true;
 }
 
 async function entrarComCodigo(codigo) {
   codigo = String(codigo || '').trim().toUpperCase();
   if (!/^[A-Z0-9]{5}$/.test(codigo)) { toast('O código tem 5 letras ou números.'); return; }
-  try { await preparoOnline(); } catch (e) { toast(e.message); return; }
+  try { if (!await preparoOnline()) return; } catch (e) { toast(e.message); return; }
   S.modo = 'sala'; ls.set('mt-sala', codigo); S.cenasN = null; S.peaoPos = {}; S.eu = null;
   enviar({ t: 'entrar', codigo });
 }
@@ -890,14 +1143,14 @@ function entrarNaRevanche(codigo) {
 }
 async function criarSala() {
   try {
-    await preparoOnline();
+    if (!await preparoOnline()) return;
     const { codigo } = await api('/api/salas', { rodadas: S.rodadas });
     S.modo = 'sala'; ls.set('mt-sala', codigo); S.cenasN = null; S.peaoPos = {}; S.eu = null;
     enviar({ t: 'entrar', codigo });
   } catch (e) { toast(e.message); }
 }
 async function entrarNaFila() {
-  try { await preparoOnline(); } catch (e) { toast(e.message); return; }
+  try { if (!await preparoOnline()) return; } catch (e) { toast(e.message); return; }
   S.fila = null; S.modo = null; ls.del('mt-sala');
   ir('fila');
   enviar({ t: 'fila_entrar' });
@@ -955,8 +1208,9 @@ function topo(extra = '') {
 
 function telaEntrada() {
   const p = S.perfil, bruto = ls.get('mt-solo', null), rec = ls.get('mt-recorde', null);
-  const salvo = bruto && bruto.v === E.VERSAO_ESTADO && bruto.estados?.eu && !bruto.estados.eu.fim ? bruto : null;
-  const dia = diaSP(), jogouHoje = ls.get(`mt-desafio-${dia}`, null) || S.ranking?.jogou;
+  // A partida salva só aparece para o perfil que a começou (ou sem conta, se começou sem conta).
+  const salvo = bruto && bruto.v === E.VERSAO_ESTADO && bruto.estados?.eu && !bruto.estados.eu.fim && (!bruto.perfil || bruto.perfil === S.perfilId) ? bruto : null;
+  const dia = diaSP(), jogouHoje = ls.get(chaveDesafio(dia), null) || S.ranking?.jogou;
   const top = S.ranking?.top?.slice(0, 3) || [];
   const casas = [
     ['partida', 'Ao passar, +30 BC de mesada.'], ['agencia', 'Depósito de 40 BC, se a conta não passar de 300 BC.'],
@@ -980,8 +1234,13 @@ function telaEntrada() {
         <div class="fichas" role="radiogroup" aria-label="Fichas">${E.FICHAS.map((f) => `<button type="button" class="ficha-op" role="radio" aria-checked="${p.ficha === f.id}" data-ficha="${f.id}" title="${esc(f.nome)}"><img src="${fichaSrc(f.id)}" alt="${esc(f.nome)}"></button>`).join('')}</div>
         <span class="note" id="fichaNome">${esc(fichaNome(p.ficha))}</span>
       </div>
-      <label class="f" style="max-width:340px">Leitura das cartas<select id="leitura"><option value="completa" ${S.leitura === 'completa' ? 'selected' : ''}>Completa (Escoteiros em diante)</option><option value="curta" ${S.leitura === 'curta' ? 'selected' : ''}>Curta (Lobinhos, com o chefe ou um responsável)</option></select></label>
+      <div class="stack" style="gap:6px"><span class="f" style="font-weight:600;font-size:.9rem">Seu nível</span>${nivelHtml(p.nivel, 'data-nivel')}
+        <span class="note">Define as cartas que saem para você. Lobinhos leem o texto curto.</span></div>
       <label class="f" style="max-width:340px">Duração (jogo sozinho e sala com código)<select id="rodadas">${E.RODADAS_OPCOES.map((n) => `<option value="${n}" ${n === S.rodadas ? 'selected' : ''}>${n} rodadas${n === E.RODADAS_PADRAO ? ' (padrão)' : ''}</option>`).join('')}</select></label>
+      ${S.registrado
+        ? `<div class="conta-linha ok"><p>Jogando como <b>${esc(p.apelido)}</b>, na conta do responsável. Salas, desafio do dia, recordes e Minha trilha liberados.</p><button class="btn sm" id="trocarPerfil">Trocar de perfil</button></div>`
+        : S.temConta ? '<div class="conta-linha"><p><b>Escolha quem vai jogar neste aparelho.</b></p><button class="btn" id="trocarPerfil">Escolher o perfil</button></div>'
+        : `<div class="conta-linha"><p><b>Sem conta, só o jogo sozinho neste aparelho.</b> Para salas, desafio do dia, recordes e Minha trilha, um adulto responsável entra com o e-mail.</p><button class="btn" id="abrirConta" ${S.online ? '' : 'disabled'}>Entrar ou criar a conta do responsável</button></div>`}
     </div>
     <div class="modos">
       <div class="modo" style="--t:var(--c-util)"><h3>Jogar sozinho</h3><p class="note">Contra 3 rivais virtuais, na hora. Funciona mesmo sem internet depois de aberto.</p>
@@ -989,7 +1248,7 @@ function telaEntrada() {
         ${salvo ? `<button class="btn" id="continuar" data-modo="${salvo.modo}">${salvo.modo === 'desafio' ? 'Continuar o desafio do dia' : `Continuar partida (rodada ${E.rodadaAtual(salvo.estados.eu)} de ${salvo.estados.eu.rodadas})`}</button>` : ''}</div>
       <div class="modo" style="--t:var(--c-agencia)"><h3>Desafio do dia</h3><p class="note">A mesma partida para todo mundo hoje (${dia.split('-').reverse().join('/')}). A primeira tentativa vale para o placar do dia.</p>
         <button class="btn big primary" id="desafio">${jogouHoje ? 'Treinar o desafio de hoje' : 'Jogar o desafio de hoje'}</button>
-        ${top.length ? `<p class="note">Placar de hoje: ${top.map((x, i) => `${i + 1}º ${esc(x.apelido)} (${x.pontos})`).join(' · ')}</p>` : ''}</div>
+        ${S.registrado && top.length ? `<p class="note">Placar de hoje: ${top.map((x, i) => `${i + 1}º ${esc(x.apelido)} (${x.pontos})`).join(' · ')}</p>` : ''}</div>
       <div class="modo" style="--t:var(--c-bussola)"><h3>Entrar com código</h3><p class="note">Alguém criou a sala e passou o código de 5 letras.</p>
         <div class="row"><input type="text" id="codigo" maxlength="5" placeholder="Código" style="text-transform:uppercase;flex:1;min-width:7em" autocapitalize="characters" ${S.online ? '' : 'disabled'}><button class="btn primary" id="entrarCod" ${S.online ? '' : 'disabled'}>Entrar</button></div>
         <button class="btn sm" id="criar" ${S.online ? '' : 'disabled'}>Criar uma sala e receber o código</button></div>
@@ -1016,7 +1275,10 @@ function ligarEntrada() {
     $('#fichaNome').textContent = fichaNome(S.perfil.ficha);
   }));
   $('#rodadas').addEventListener('change', (e) => { S.rodadas = Number(e.target.value); });
-  $('#leitura').addEventListener('change', (e) => { S.leitura = e.target.value; ls.set('mt-leitura', S.leitura); });
+  app.querySelectorAll('[data-nivel]').forEach((b) => b.addEventListener('click', () => {
+    S.perfil.nivel = b.dataset.nivel; ls.set('mt-perfil', S.perfil);
+    app.querySelectorAll('[data-nivel]').forEach((x) => x.setAttribute('aria-checked', x === b));
+  }));
   $('#solo').addEventListener('click', () => jogarSozinho(false));
   $('#continuar')?.addEventListener('click', (e) => jogarSozinho(true, e.currentTarget.dataset.modo));
   $('#desafio').addEventListener('click', jogarDesafio);
@@ -1028,20 +1290,25 @@ function ligarEntrada() {
   $('#codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrarComCodigo(e.target.value); });
   $('#criar').addEventListener('click', criarSala);
   $('#fila').addEventListener('click', entrarNaFila);
+  $('#abrirConta')?.addEventListener('click', () => abrirConta());
+  $('#trocarPerfil')?.addEventListener('click', () => abrirPerfis());
 }
 
 // ---------- Minha trilha (E3) ----------
 const MODOS = { solo: 'Sozinho', desafio: 'Desafio do dia', espera: 'Sala de espera', codigo: 'Sala com código' };
 async function abrirTrilha() {
-  S.trilha = null; S.conta = { resp: null, emailEnviado: null }; ir('trilha');
+  S.trilha = null; S.conta = { dados: null, emailEnviado: null, apagar: false }; ir('trilha');
+  // O que está guardado só neste aparelho (sem conta ou sem rede).
+  const doAparelho = (extra) => ({ ...extra, partidas: ls.get('mt-historico', []),
+    recordes: { solo: ls.get('mt-recorde', null)?.pontos, desafio: ls.get('mt-recorde-desafio', null)?.pontos }, insignias: [] });
+  if (S.temConta && !S.registrado) { abrirPerfis(); return; }
+  if (!S.registrado) { S.trilha = doAparelho({ semConta: true }); render(); return; }
   try {
     S.trilha = await api('/api/minha-trilha');
     mesclarInsignias(S.trilha.insignias.map((i) => i.id));
-    S.conta.resp = await api('/api/responsavel').catch(() => null);
+    S.conta.dados = await api('/api/conta').catch(() => null);
   } catch {
-    // sem rede ou sem apelido no servidor: mostra o que está guardado no aparelho
-    S.trilha = { offline: true, partidas: ls.get('mt-historico', []),
-      recordes: { solo: ls.get('mt-recorde', null)?.pontos, desafio: ls.get('mt-recorde-desafio', null)?.pontos }, insignias: [] };
+    S.trilha = doAparelho({ offline: true });
   }
   render();
 }
@@ -1052,52 +1319,251 @@ function telaTrilha() {
     <div class="box"><div class="eyebrow">Insígnias · ${E.INSIGNIAS.filter((i) => ganhas.has(i.id)).length} de ${E.INSIGNIAS.length}</div>
       <div class="insignias">${E.INSIGNIAS.map((i) => `<div class="insignia${ganhas.has(i.id) ? '' : ' off'}">${seloHtml(i.id, !ganhas.has(i.id))}<div><b>${esc(i.nome)}</b><span class="note">${esc(i.desc)}</span></div></div>`).join('')}</div></div>
     <div class="box"><div class="eyebrow">Últimas partidas</div>${t.partidas.length ? `<table class="extrato">${t.partidas.map((p) => `<tr><td>${MODOS[p.modo] || p.modo}</td><td class="v">${p.pontos} pts</td><td class="v muted">${p.saldo} BC</td><td class="v muted">${new Date(p.quando).toLocaleDateString('pt-BR')}</td></tr>`).join('')}</table>` : '<p class="note">Nenhuma partida terminada ainda.</p>'}
-      ${t.offline ? '<p class="note">Sem conexão: mostrando só o que está neste aparelho.</p>' : ''}</div>
-    ${t.offline ? '<div class="box"><div class="eyebrow">Conta</div><p class="note">O código de recuperação e o quadro de recordes precisam de conexão e de um apelido salvo no servidor.</p></div>' : contaHtml()}`;
+      ${t.offline || t.semConta ? '<p class="note">Mostrando só o que está guardado neste aparelho.</p>' : ''}</div>
+    ${t.semConta ? `<div class="box"><div class="eyebrow">Conta do responsável</div><p class="note">Sem conta, o histórico e as insígnias ficam só neste aparelho e somem se o navegador for limpo. Com a conta, um adulto responsável guarda tudo e recupera em qualquer aparelho.</p><div class="row"><button class="btn primary" id="trilhaConta" ${S.online ? '' : 'disabled'}>Entrar ou criar a conta do responsável</button></div></div>`
+      : t.offline ? '<div class="box"><div class="eyebrow">Conta</div><p class="note">Os dados da conta precisam de conexão com o servidor.</p></div>' : contaHtml()}`;
   return `${topo(`<span class="chip">Minha trilha</span><span class="sp"></span>${botaoSom()}${botaoMusica()}<button class="btn sm" id="voltarTrilha">Voltar</button>`)}
   <div class="wrap trilha stack">${corpo}</div>`;
 }
-// ---------- Conta: código de recuperação, e-mail do responsável e quadro de recordes ----------
+// ---------- Conta do responsável em Minha trilha: e-mail, quadro de recordes, código de recuperação e apagar ----------
 function contaHtml() {
-  const r = S.conta?.resp, c = S.conta || {};
-  let quadro;
-  if (!r) quadro = '<p class="muted">Carregando…</p>';
-  else if (r.confirmado) quadro = `<p>Você aparece no quadro de recordes. E-mail do responsável: <b>${esc(r.email)}</b>.</p><div class="row"><button class="btn sm danger" id="sairQuadro">Sair do quadro e apagar o e-mail</button></div>`;
-  else if (!r.disponivel) quadro = '<p class="note">O envio de e-mail ainda não está ligado neste servidor, então o quadro de recordes está fechado.</p>';
-  else if (c.emailEnviado) quadro = `<p>Mandamos um código de 6 números para <b>${esc(c.emailEnviado)}</b>. Peça ao responsável para ler o e-mail e digite aqui.</p>
-    <div class="form-linha"><label class="f">Código do e-mail<input id="codigoEmail" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></label><button class="btn primary" id="confirmarEmail">Confirmar</button></div>`;
-  else quadro = `<p class="note">Para aparecer no quadro, um responsável precisa autorizar: informe o e-mail dele e confirme com o código que ele receber.</p>
-    <div class="form-linha"><label class="f">E-mail do responsável<input id="emailResp" type="email" maxlength="120" autocomplete="email" placeholder="responsavel@exemplo.com.br"></label><button class="btn primary" id="enviarEmail">Enviar código</button></div>`;
-  return `<div class="box"><div class="eyebrow">Código de recuperação</div>
-      <p class="note">Se limpar o navegador, você perde as insígnias e o histórico. Com um código de 6 palavras você recupera tudo em qualquer aparelho.</p>
-      ${S.codigoNovo ? `<div class="palavras">${S.codigoNovo.map((x) => `<span>${x}</span>`).join('')}</div><p class="note">Anote ou imprima agora: ele aparece só desta vez. Gerar outro código invalida este. Quem tiver estas palavras entra na sua conta.</p><div class="row"><button class="btn sm" id="copiarCodigo">Copiar</button></div>` : '<div class="row"><button class="btn" id="gerarCodigo">Gerar o meu código</button></div>'}</div>
-    <div class="box"><div class="eyebrow">Quadro de recordes</div>${quadro}
-      <p class="note">O quadro mostra só apelido, ficha e pontos. O e-mail do responsável serve só para confirmar a autorização e pode ser apagado a qualquer hora.</p></div>`;
+  const c = S.conta || {}, d = c.dados;
+  if (!d) return '<div class="box"><div class="eyebrow">Conta do responsável</div><p class="muted">Carregando…</p></div>';
+  const troca = c.emailEnviado
+    ? `<p>Mandamos um código de 6 números para <b>${esc(c.emailEnviado)}</b>. Ele vale por 15 minutos.</p>
+      <div class="form-linha"><label class="f">Código do e-mail novo<input id="codigoEmail" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></label><button class="btn primary" id="confirmarEmail">Trocar o e-mail</button></div>`
+    : d.emailLigado ? `<div class="form-linha"><label class="f">E-mail novo<input id="emailNovo" type="email" maxlength="120" autocomplete="email" placeholder="responsavel@exemplo.com.br"></label><button class="btn" id="enviarEmail">Enviar código</button></div>`
+      : '<p class="note">O envio de e-mail não está ligado neste servidor agora.</p>';
+  return `<div class="box"><div class="eyebrow">Conta do responsável</div>
+      <p>Conta de <b>${esc(d.conta.email)}</b>. Neste aparelho joga <b>${esc(d.perfil.apelido)}</b>.</p>
+      <details${c.emailEnviado ? ' open' : ''}><summary>Trocar o e-mail</summary><div class="stack" style="margin-top:8px">${troca}<p class="note">O e-mail só muda depois de confirmado o código que chegar no e-mail novo.</p></div></details>
+      <div class="row"><button class="btn sm" id="sairConta">Sair deste aparelho</button></div>
+      <p class="note">Sair deste aparelho não apaga nada: o responsável entra de novo com o e-mail ou com o código de recuperação.</p></div>
+    <div class="box"><div class="eyebrow">Quadro de recordes</div>
+      ${d.perfil.noQuadro
+        ? `<p><b>${esc(d.perfil.apelido)}</b> aparece no quadro de recordes.</p><div class="row"><button class="btn sm" id="quadroNao">Tirar do quadro</button></div>`
+        : `<p><b>${esc(d.perfil.apelido)}</b> não aparece no quadro de recordes.</p><div class="row"><button class="btn sm primary" id="quadroSim">Mostrar no quadro</button></div>`}
+      <p class="note">O quadro mostra só apelido, ficha e pontos, nunca o e-mail. Quem decide é o responsável, perfil por perfil.</p></div>
+    <div class="box"><div class="eyebrow">Perfis da conta · ${d.perfis.length} de ${d.maxPerfis}</div>
+      <div class="perfis-lista">${d.perfis.map((x) => `<div class="perfil-linha"><img src="${fichaSrc(x.ficha)}" alt=""><span class="pl-nome"><b>${esc(x.apelido)}</b><span class="note">${esc(E.NIVEIS[x.nivel] || '')}${x.id === d.perfil.id ? ' · neste aparelho' : ''}</span></span><span class="sp"></span>${c.apagarPerfil === x.id ? '' : `<button class="btn sm danger" data-apagar-perfil="${x.id}">Apagar</button>`}</div>
+        ${c.apagarPerfil === x.id ? confirmarApagarPerfil(x, c) : ''}`).join('')}</div>
+      <div class="row"><button class="btn sm" id="irPerfis">Trocar de perfil ou criar outro</button></div>
+      <p class="note">Cada perfil tem o seu histórico, as suas insígnias e o seu código de recuperação. Perfis diferentes jogam ao mesmo tempo em aparelhos diferentes; o mesmo perfil joga em um aparelho por vez.</p></div>
+    <div class="box"><div class="eyebrow">Código de recuperação de ${esc(d.perfil.apelido)}</div>
+      <p class="note">Outra forma de entrar na conta, sem e-mail: 6 palavras que valem em qualquer aparelho e já escolhem este perfil.</p>
+      ${S.codigoNovo ? `<div class="palavras">${S.codigoNovo.map((x) => `<span>${x}</span>`).join('')}</div><p class="note">Anote ou imprima agora: ele aparece só desta vez. Gerar outro código invalida este. Quem tiver estas palavras entra na conta.</p><div class="row"><button class="btn sm" id="copiarCodigo">Copiar</button></div>` : '<div class="row"><button class="btn" id="gerarCodigo">Gerar o código</button></div>'}</div>
+    <div class="box apagar-conta"><div class="eyebrow">Apagar a conta</div>
+      ${c.apagar ? confirmarApagarConta(d, c)
+        : '<p class="note">O responsável pode apagar a conta e todos os dados dela quando quiser.</p><div class="row"><button class="btn sm danger" id="apagarConta">Apagar a conta</button></div>'}</div>`;
+}
+// Apagar pontuação pede o código enviado ao e-mail da conta: quem decide é o responsável, não quem está com o aparelho.
+const campoCodigo = (id, email) => `<p>Mandamos um código de 6 números para <b>${esc(email)}</b>. Ele vale por 15 minutos.</p>
+  <label class="f">Código do e-mail<input id="${id}" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></label>`;
+function confirmarApagarPerfil(x, c) {
+  const passo = !x.pontuacao
+    ? `<p class="note">${esc(x.apelido)} ainda não tem nenhuma partida. Apagar o perfil?</p><div class="row"><button class="btn sm danger" data-apagar-sim="${x.id}">Apagar</button><button class="btn sm" id="apagarPerfilNao">Cancelar</button></div>`
+    : !c.codigoPerfil
+      ? `<p class="note"><b>${esc(x.apelido)} tem pontuação.</b> Apagar leva para sempre as partidas, as insígnias e o código de recuperação. Para isso, o responsável confirma com um código enviado ao e-mail da conta.</p><div class="row"><button class="btn sm" data-codigo-perfil="${x.id}">Enviar código</button><button class="btn sm" id="apagarPerfilNao">Cancelar</button></div>`
+      : `${campoCodigo('codigoApagarPerfil', c.codigoPerfil)}<div class="row"><button class="btn sm danger" data-apagar-sim="${x.id}">Apagar ${esc(x.apelido)}</button><button class="btn sm" id="apagarPerfilNao">Cancelar</button></div>`;
+  return `<div class="confirmar-apagar">${passo}</div>`;
+}
+function confirmarApagarConta(d, c) {
+  const pontos = d.perfis.some((x) => x.pontuacao);
+  const aviso = `<p><b>Isso apaga para sempre</b> o e-mail, todos os perfis, as partidas, as insígnias e os códigos de recuperação, e desconecta todos os aparelhos. Não dá para desfazer.</p>
+    <p class="note">O que está guardado só neste aparelho continua aqui até você limpar os dados do site.</p>`;
+  if (pontos && !c.codigoConta) return `${aviso}<p class="note">Há perfis com pontuação, então o responsável confirma com um código enviado ao e-mail da conta.</p>
+    <div class="row"><button class="btn" id="codigoConta">Enviar código</button><button class="btn" id="apagarNao">Cancelar</button></div>`;
+  return `${aviso}${pontos ? campoCodigo('codigoApagarConta', c.codigoConta) : ''}
+    <div class="row"><button class="btn danger" id="apagarSim">Sim, apagar a conta</button><button class="btn" id="apagarNao">Cancelar</button></div>`;
 }
 async function acaoConta(fn, ok) {
   try { await fn(); if (ok) toast(ok); } catch (e) { toast(e.message); }
   render();
 }
+// O aparelho deixou de ter conta (saiu ou apagou): esquece a sala e os resultados que ainda iam subir para ela.
+function semContaNoAparelho() {
+  S.registrado = false; S.temConta = false; S.perfilId = null; S.perfis = []; S.ranking = null; S.trilha = null; S.conta = null; S.codigoNovo = null;
+  ls.del('mt-sala'); ls.set('mt-envios', []);
+  if (ws) { try { ws.close(); } catch { /* já fechado */ } }
+}
 function ligarTrilha() {
   $('#voltarTrilha')?.addEventListener('click', () => { S.trilha = null; S.codigoNovo = null; ir('entrada'); });
+  $('#trilhaConta')?.addEventListener('click', () => abrirConta());
   $('#gerarCodigo')?.addEventListener('click', () => acaoConta(async () => { S.codigoNovo = (await api('/api/recuperacao', {})).palavras; }));
   $('#copiarCodigo')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(S.codigoNovo.join(' ')); toast('Código copiado.'); } catch { toast('Copie as palavras à mão.'); } });
   $('#enviarEmail')?.addEventListener('click', () => acaoConta(async () => {
-    S.conta.emailEnviado = (await api('/api/responsavel', { email: $('#emailResp').value })).email;
-  }, 'Código enviado. Veja a caixa de entrada do responsável.'));
+    S.conta.emailEnviado = (await api('/api/conta/email', { email: $('#emailNovo').value })).email;
+  }, 'Código enviado. Veja a caixa de entrada do e-mail novo.'));
   $('#confirmarEmail')?.addEventListener('click', () => acaoConta(async () => {
-    await api('/api/responsavel/confirmar', { codigo: $('#codigoEmail').value });
-    S.conta.resp = await api('/api/responsavel'); S.conta.emailEnviado = null;
-  }, 'Pronto: você entrou no quadro de recordes.'));
-  $('#sairQuadro')?.addEventListener('click', () => acaoConta(async () => {
-    const r = await fetch('/api/responsavel', { method: 'DELETE' });
-    if (!r.ok) throw new Error('Não foi possível sair do quadro agora.');
-    S.conta.resp = await api('/api/responsavel');
-  }, 'Você saiu do quadro e o e-mail foi apagado.'));
+    await api('/api/conta/email/confirmar', { codigo: $('#codigoEmail').value });
+    S.conta.dados = await api('/api/conta'); S.conta.emailEnviado = null;
+  }, 'Pronto: o e-mail da conta foi trocado.'));
+  const quadro = (sim) => acaoConta(async () => {
+    await api('/api/conta/quadro', { sim });
+    S.conta.dados = await api('/api/conta');
+  }, sim ? 'Pronto: a conta aparece no quadro de recordes.' : 'A conta saiu do quadro de recordes.');
+  $('#quadroSim')?.addEventListener('click', () => quadro(true));
+  $('#quadroNao')?.addEventListener('click', () => quadro(false));
+  $('#apagarConta')?.addEventListener('click', () => { S.conta.apagar = true; render(); });
+  $('#irPerfis')?.addEventListener('click', () => abrirPerfis());
+  app.querySelectorAll('[data-apagar-perfil]').forEach((b) => b.addEventListener('click', () => { S.conta.apagarPerfil = b.dataset.apagarPerfil; S.conta.codigoPerfil = null; render(); }));
+  $('#apagarPerfilNao')?.addEventListener('click', () => { S.conta.apagarPerfil = null; S.conta.codigoPerfil = null; render(); });
+  app.querySelectorAll('[data-codigo-perfil]').forEach((b) => b.addEventListener('click', () => acaoConta(async () => {
+    S.conta.codigoPerfil = (await api('/api/conta/codigo-apagar', { acao: 'apagar_perfil', id: b.dataset.codigoPerfil })).email;
+  }, 'Código enviado ao e-mail da conta.')));
+  app.querySelectorAll('[data-apagar-sim]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const r = await api('/api/perfis/apagar', { id: b.dataset.apagarSim, confirmo: true, codigo: $('#codigoApagarPerfil')?.value });
+      aplicarConta(r); S.conta.apagarPerfil = null; S.conta.codigoPerfil = null;
+      toast('O perfil foi apagado.');
+      if (!S.registrado) { abrirPerfis(); return; }
+      S.conta.dados = { ...(await api('/api/conta')) };
+    } catch (e) { toast(e.message); }
+    render();
+  }));
+  $('#apagarNao')?.addEventListener('click', () => { S.conta.apagar = false; S.conta.codigoConta = null; render(); });
+  $('#codigoConta')?.addEventListener('click', () => acaoConta(async () => {
+    S.conta.codigoConta = (await api('/api/conta/codigo-apagar', { acao: 'apagar_conta' })).email;
+  }, 'Código enviado ao e-mail da conta.'));
+  $('#apagarSim')?.addEventListener('click', async () => {
+    try {
+      await api('/api/conta/apagar', { confirmo: true, codigo: $('#codigoApagarConta')?.value });
+      semContaNoAparelho(); toast('A conta e todos os dados dela foram apagados.'); ir('entrada');
+    } catch (e) { toast(e.message); }
+  });
+  $('#sairConta')?.addEventListener('click', async () => {
+    try {
+      await api('/api/conta/sair', {});
+      semContaNoAparelho(); toast('Este aparelho saiu da conta.'); ir('entrada');
+    } catch (e) { toast(e.message); }
+  });
 }
 
-// ---------- Quadro de recordes (só quem tem o e-mail do responsável confirmado) ----------
+// ---------- Quem vai jogar? (perfis da conta, como num serviço de streaming) ----------
+async function abrirPerfis(pedida = false) {
+  if (pedida) toast('Escolha quem vai jogar neste aparelho.');
+  S.novoPerfil = null; ir('perfis');
+  try { aplicarConta(await api('/api/conta')); } catch (e) { toast(e.message); }
+  render();
+}
+function telaPerfis() {
+  const n = S.novoPerfil, cheia = S.perfis.length >= S.maxPerfis;
+  const lista = S.perfis.map((x) => `<button class="perfil-card${x.id === S.perfilId ? ' atual' : ''}" data-perfil="${x.id}"><img src="${fichaSrc(x.ficha)}" alt=""><b>${esc(x.apelido)}</b><span class="note">${esc(E.NIVEIS[x.nivel] || '')}</span>${x.id === S.perfilId ? '<span class="note">neste aparelho</span>' : ''}</button>`).join('');
+  const novo = n ? `<div class="box">
+      <h3>Novo perfil</h3>
+      <label class="f">Apelido<input type="text" id="novoApelido" maxlength="20" autocomplete="off" placeholder="Ex.: Coruja Atenta" value="${esc(n.apelido)}"></label>
+      <div class="fichas" role="radiogroup" aria-label="Fichas">${E.FICHAS.map((f) => `<button type="button" class="ficha-op" role="radio" aria-checked="${n.ficha === f.id}" data-nova-ficha="${f.id}" title="${esc(f.nome)}"><img src="${fichaSrc(f.id)}" alt="${esc(f.nome)}"></button>`).join('')}</div>
+      <div class="stack" style="gap:6px"><span class="f" style="font-weight:600;font-size:.9rem">Nível</span>${nivelHtml(n.nivel, 'data-novo-nivel')}</div>
+      <div class="row"><button class="btn primary" id="criarPerfil">Criar e jogar</button><button class="btn" id="cancelarPerfil">Cancelar</button></div></div>`
+    : cheia ? `<p class="note">A conta já tem ${S.maxPerfis} perfis. Para criar outro, apague um em Minha trilha.</p>`
+      : '<button class="perfil-card novo" id="novoPerfil"><span class="mais" aria-hidden="true">+</span><b>Novo perfil</b></button>';
+  return `${topo(`<span class="chip">Quem vai jogar?</span><span class="sp"></span>${S.registrado ? '<button class="btn sm" id="voltarPerfis">Voltar</button>' : ''}`)}
+  <div class="wrap trilha stack">
+    <h2>Quem vai jogar?</h2>
+    <div class="perfis-grade">${lista}${n || cheia ? '' : novo}</div>
+    ${n || cheia ? novo : ''}
+    <p class="note">Cada criança tem o seu perfil, com histórico, insígnias e quadro de recordes próprios. Perfis diferentes jogam ao mesmo tempo em aparelhos diferentes; o mesmo perfil joga em um aparelho por vez.</p>
+  </div>`;
+}
+function ligarPerfis() {
+  $('#voltarPerfis')?.addEventListener('click', () => ir('entrada'));
+  app.querySelectorAll('[data-perfil]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      aplicarConta(await api('/api/perfis/escolher', { id: b.dataset.perfil }));
+      toast(`Bom jogo, ${S.perfil.apelido}!`);
+      enviarPendentes(); carregarRanking();
+      ir('entrada');
+    } catch (e) { toast(e.message); }
+  }));
+  $('#novoPerfil')?.addEventListener('click', () => { S.novoPerfil = { apelido: '', ficha: E.FICHAS[0].id, nivel: E.NIVEL_PADRAO }; render(); });
+  $('#cancelarPerfil')?.addEventListener('click', () => { S.novoPerfil = null; render(); });
+  $('#novoApelido')?.addEventListener('input', (e) => { S.novoPerfil.apelido = e.target.value; });
+  app.querySelectorAll('[data-nova-ficha]').forEach((b) => b.addEventListener('click', () => { S.novoPerfil.ficha = b.dataset.novaFicha; render(); $('#novoApelido')?.focus(); }));
+  app.querySelectorAll('[data-novo-nivel]').forEach((b) => b.addEventListener('click', () => {
+    S.novoPerfil.nivel = b.dataset.novoNivel;
+    app.querySelectorAll('[data-novo-nivel]').forEach((x) => x.setAttribute('aria-checked', x === b));
+  }));
+  $('#criarPerfil')?.addEventListener('click', async () => {
+    try {
+      aplicarConta(await api('/api/perfis', { apelido: S.novoPerfil.apelido, ficha: S.novoPerfil.ficha, nivel: S.novoPerfil.nivel }));
+      S.novoPerfil = null;
+      toast(`Perfil criado. Bom jogo, ${S.perfil.apelido}!`);
+      ir('entrada');
+    } catch (e) { toast(e.message); }
+  });
+}
+
+// ---------- Entrar ou criar a conta do responsável (e-mail + código) ----------
+function abrirConta(pedida = false) {
+  if (pedida) toast('Para isso, um responsável precisa entrar com o e-mail.');
+  S.entrada = { enviado: null, email: '' };
+  ir('conta');
+}
+function telaConta() {
+  const e = S.entrada || {}, p = S.perfil;
+  let corpo;
+  if (!S.emailLigado) corpo = '<p class="note">O envio de e-mail ainda não está ligado neste servidor, então ainda não dá para entrar ou criar a conta. Enquanto isso, dá para jogar sozinho.</p>';
+  else if (!e.enviado) corpo = `
+    <label class="f">E-mail do responsável<input id="contaEmail" type="email" maxlength="120" autocomplete="email" placeholder="responsavel@exemplo.com.br" value="${esc(e.email)}"></label>
+    <label class="check"><input type="checkbox" id="contaMaior"><span>Tenho 18 anos ou mais e sou responsável pela criança que vai jogar.</span></label>
+    <div class="row"><button class="btn primary" id="contaEnviar">Enviar código</button></div>`;
+  else corpo = `
+    <p>Mandamos um código de 6 números para <b>${esc(e.enviado)}</b>. Ele vale por 15 minutos.</p>
+    <label class="f">Código do e-mail<input id="contaCodigo" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></label>
+    <div class="conta-quem"><img src="${fichaSrc(p.ficha)}" alt="${esc(fichaNome(p.ficha))}"><label class="f">Se a conta for nova, a criança joga como<input id="contaApelido" type="text" maxlength="20" autocomplete="nickname" placeholder="Ex.: Lobo Veloz" value="${esc(p.apelido)}"></label></div>
+    <div class="stack" style="gap:6px"><span class="f" style="font-weight:600;font-size:.9rem">Nível da criança</span>${nivelHtml(p.nivel, 'data-conta-nivel')}</div>
+    <p class="note">Se a conta já existir, entramos nela e você escolhe quem vai jogar entre os perfis dela.</p>
+    <div class="row"><button class="btn primary" id="contaEntrar">Entrar</button><button class="btn" id="contaOutro">Usar outro e-mail</button></div>`;
+  return `${topo(`<span class="chip">Conta do responsável</span><span class="sp"></span><button class="btn sm" id="voltarConta">Voltar</button>`)}
+  <div class="wrap trilha stack">
+    <div class="box">
+      <h2>Conta do responsável</h2>
+      <p>A conta é de um adulto: o pai, a mãe ou o responsável legal. A criança joga dentro dela.</p>
+      <p class="note">Com a conta, a criança joga em salas, faz o desafio do dia, guarda o histórico e as insígnias em Minha trilha e pode aparecer no quadro de recordes, se o responsável quiser. Sem conta, só dá para jogar sozinho neste aparelho.</p>
+      ${corpo}
+    </div>
+    <p class="note">O e-mail serve só para entrar na conta e receber os códigos. Ele nunca aparece para outros jogadores. Não pedimos nenhum dado da criança.</p>
+  </div>`;
+}
+function ligarConta() {
+  $('#voltarConta')?.addEventListener('click', () => { S.entrada = null; ir('entrada'); });
+  const enviar = async () => {
+    const email = $('#contaEmail').value.trim();
+    if (!$('#contaMaior').checked) { toast('Marque que você é um adulto responsável pela criança.'); return; }
+    try {
+      const r = await api('/api/conta/codigo', { email, maior: true });
+      S.entrada = { email, enviado: r.email };
+      toast('Código enviado. Veja a caixa de entrada.');
+      render();
+    } catch (err) { toast(err.message); }
+  };
+  $('#contaEnviar')?.addEventListener('click', enviar);
+  $('#contaEmail')?.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') enviar(); });
+  $('#contaOutro')?.addEventListener('click', () => { S.entrada = { email: S.entrada?.email || '', enviado: null }; render(); });
+  app.querySelectorAll('[data-conta-nivel]').forEach((b) => b.addEventListener('click', () => {
+    S.perfil.nivel = b.dataset.contaNivel; ls.set('mt-perfil', S.perfil);
+    app.querySelectorAll('[data-conta-nivel]').forEach((x) => x.setAttribute('aria-checked', x === b));
+  }));
+  const entrar = async () => {
+    const apelido = $('#contaApelido').value.trim();
+    if (apelido) S.perfil.apelido = apelido;
+    try {
+      const r = await api('/api/conta/entrar', { email: S.entrada.email, codigo: $('#contaCodigo').value, maior: true, apelido: S.perfil.apelido, ficha: S.perfil.ficha, nivel: S.perfil.nivel });
+      aplicarConta(r);
+      S.entrada = null;
+      if (!r.perfil) { toast('Conta conectada. Escolha quem vai jogar.'); abrirPerfis(); return; }
+      toast(`Conta conectada. Bom jogo, ${r.perfil.apelido}!`);
+      enviarPendentes(); carregarRanking();
+      ir('entrada');
+    } catch (err) { toast(err.message); }
+  };
+  $('#contaEntrar')?.addEventListener('click', entrar);
+  $('#contaCodigo')?.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') entrar(); });
+}
+
+// ---------- Quadro de recordes (só para quem tem conta; mostra as contas que o responsável inscreveu) ----------
 async function abrirRecordes() {
+  if (!S.registrado) { pedirConta(); return; }
   S.quadro = null; ir('recordes');
   try { S.quadro = await api('/api/recordes'); } catch { S.quadro = { erro: true }; }
   render();
@@ -1107,7 +1573,7 @@ function telaRecordes() {
   const lista = (k) => (q[k]?.length ? `<ol>${q[k].map((x) => `<li><img src="${fichaSrc(x.ficha)}" alt=""><span>${esc(x.apelido)}</span><b>${x.pontos} pts</b></li>`).join('')}</ol>` : '<p class="note">Ninguém ainda.</p>');
   const corpo = !q ? '<p class="muted">Carregando…</p>' : q.erro ? '<p class="note">Não foi possível carregar o quadro agora.</p>'
     : `<div class="quadro">${Object.entries(MODOS).map(([k, nome]) => `<div class="box"><div class="eyebrow">${nome}</div>${lista(k)}</div>`).join('')}</div>
-      <p class="note">Aparecem só jogadores cujo responsável confirmou o e-mail. Para entrar, abra Minha trilha.</p>`;
+      <p class="note">Aparecem só as contas que o responsável colocou no quadro. Para entrar ou sair, abra Minha trilha.</p>`;
   return `${topo(`<span class="chip">Quadro de recordes</span><span class="sp"></span>${botaoSom()}${botaoMusica()}<button class="btn sm" id="voltarRecordes">Voltar</button>`)}
   <div class="wrap trilha stack">${corpo}</div>`;
 }
@@ -1117,9 +1583,16 @@ function ligarRecordes() { $('#voltarRecordes')?.addEventListener('click', () =>
 async function recuperarConta(texto) {
   try {
     const r = await api('/api/recuperar', { palavras: texto });
-    S.online = true; S.registrado = true; S.perfil = { ...S.perfil, ...r.jogador };
-    ls.set('mt-perfil', S.perfil); mesclarInsignias(r.insignias || []);
+    S.online = true;
+    if (!r.jogador) {
+      // jogador de antes da conta do responsável: volta para este aparelho e vira conta quando um adulto entrar
+      S.registrado = false; S.perfil = { ...S.perfil, ...r.semConta }; ls.set('mt-perfil', S.perfil);
+      toast(`Encontramos ${r.semConta.apelido}. Para guardar o histórico de novo, um responsável precisa entrar com o e-mail.`);
+      abrirConta(); return;
+    }
+    aplicarConta(r);
     toast(`Conta recuperada: bem-vindo de volta, ${r.jogador.apelido}!`);
+    enviarPendentes(); carregarRanking();
   } catch (e) { toast(e.message); }
   render();
 }
@@ -1279,11 +1752,11 @@ function painel(st) {
           return `<label class="item${tem ? ' tem' : ''}"><span class="row"><input type="checkbox" data-item="${i.id}" ${tem ? 'disabled checked' : S.carrinho[i.id] ? 'checked' : ''}>${i.nome}${tem ? ' · já no kit' : ''}</span><span>${pr !== i.preco ? `<s>${i.preco}</s> ` : ''}${bc(pr)}</span></label>`; }).join('')}</div>
         <div class="total"><span>Total · saldo ${bc(st.saldo)}</span><b>${bc(total)}</b></div>
         ${S.erro ? `<div class="erro">${esc(S.erro)}</div>` : ''}
-        <div class="row"><button class="btn primary" id="pagarLoja" ${sel.length && !S.aguardando ? '' : 'disabled'}>Pagar ${bc(total)}</button><button class="btn" id="sairLoja" ${trava}>Sair sem comprar</button></div>`;
+        <div class="row"><button class="btn primary" id="pagarLoja" ${sel.length && !S.aguardando ? '' : 'disabled'}>Pagar ${bc(total)}</button><button class="btn" id="sairLoja" ${trava}>Sair sem comprar</button><button class="btn sm" id="verBarraca">Ver a barraca</button></div>`;
     } else if (st.pend.tipo === 'carta') {
       const c = E.cartaMostrada(st, st.pend.carta);
       titulo = E.CASAS[c.tipo].nome;
-      const curta = S.leitura === 'curta' && c.curto;
+      const curta = leituraCurta() && c.curto;
       corpo = `<div class="carta" style="--t:var(--c-${c.tipo})"><span class="tag">Carta ${E.CASAS[c.tipo].nome}${c.sala ? ' · vale para a sala toda' : ''}</span><strong>${esc(c.titulo)}</strong>${curta ? `<span><b>${esc(c.curto)}</b></span>` : `<span>${esc(c.historia)}</span>`}</div>
         ${curta ? '' : `<p><b>${esc(c.pergunta)}</b></p>`}
         ${c.tipo === 'tempestade' ? '<p class="note">Acertar a pergunta evita o revés.</p>' : ''}
@@ -1445,6 +1918,7 @@ function atualizarPainel() {
   const st = eu(); const el = $('#painel'); if (!st || !el) return;
   const j = painelJanela();
   el.innerHTML = j.html + (j.exclusivo ? '' : painelOfertas() + painel(st)); ligarPainel(); tique();
+  atualizarLojaGrande();   // a barraca aberta acompanha o carrinho, os avisos e os erros
 }
 function atualizarMural() { const el = $('#mural'); if (el) el.innerHTML = muralHtml(); }
 
@@ -1506,6 +1980,7 @@ function ligarPainel() {
   app.querySelectorAll('[data-item]').forEach((c) => c.addEventListener('change', () => { S.carrinho[c.dataset.item] = c.checked; S.erro = ''; atualizarPainel(); }));
   $('#pagarLoja')?.addEventListener('click', () => acao('comprar', { itens: Object.keys(S.carrinho).filter((k) => S.carrinho[k]) }));
   $('#sairLoja')?.addEventListener('click', () => acao('sair_loja'));
+  $('#verBarraca')?.addEventListener('click', () => { const st = eu(); if (st?.pend?.tipo === 'loja') abrirLojaGrande(st.pend.loja, false); });
   app.querySelectorAll('[data-resp]').forEach((b) => b.addEventListener('click', () => acao('responder', { i: Number(b.dataset.resp) })));
   $('#pagar')?.addEventListener('click', () => acao('pagar'));
   $('#arriscar')?.addEventListener('click', () => acao('arriscar'));
@@ -1611,10 +2086,13 @@ function ligarResultado() {
 }
 
 function render() {
+  if (S.tela !== 'jogo') { $('#cartaPalco')?.remove(); $('#lojaPalco')?.remove(); }   // carta e barraca só existem na tela do jogo
   if (S.tela === 'entrada') { app.innerHTML = telaEntrada(); ligarEntrada(); }
   else if (S.tela === 'fila') { app.innerHTML = telaFila(); ligarFila(); }
   else if (S.tela === 'trilha') { app.innerHTML = telaTrilha(); ligarTrilha(); }
   else if (S.tela === 'recordes') { app.innerHTML = telaRecordes(); ligarRecordes(); }
+  else if (S.tela === 'conta') { app.innerHTML = telaConta(); ligarConta(); }
+  else if (S.tela === 'perfis') { app.innerHTML = telaPerfis(); ligarPerfis(); }
   else if (S.tela === 'jogo') {
     const vazio = telaJogo();
     if (vazio) { app.innerHTML = vazio; $('#sair')?.addEventListener('click', sairDoJogo); }

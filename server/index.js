@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { pool, migrar } from './db.js';
 import * as S from './salas.js';
 import { limparApelido, apelidoProibido } from './apelido.js';
-import { rotasConta } from './conta.js';
+import { rotasConta, SEM_CONTA } from './conta.js';
+import { modoEmail } from './email.js';
 import * as E from '../public/js/engine.js';
 import { FICHAS, RODADAS_OPCOES, RODADAS_PADRAO, ACOES_DO_JOGO } from '../public/js/engine.js';
 
@@ -28,58 +29,83 @@ await app.register(cookie);
 await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
 await app.register(websocket, { options: { maxPayload: 4096 } });
 if (process.env.SERVIR_ESTATICOS !== '0') {
-  await app.register(fastifyStatic, { root: path.join(raiz, 'public'), maxAge: '1h' });
+  // HTML, JS e CSS: o navegador confere a versão a cada carga (ETag), para nunca misturar tela velha com
+  // servidor novo. Imagens mudam pouco e podem ficar um dia no cache.
+  await app.register(fastifyStatic, {
+    root: path.join(raiz, 'public'),
+    cacheControl: false,
+    setHeaders: (reply, arquivo) => reply.header('Cache-Control', /[\\/]img[\\/]/.test(arquivo) ? 'public, max-age=86400' : 'no-cache'),
+  });
 }
 
-// ---------- Identidade anônima (apelido + ficha, sem dados pessoais) ----------
+// ---------- Conta do responsável: o cookie mt_token é a sessão do aparelho ----------
+// Cada aparelho tem a sua sessão (conta + perfil escolhido nele); entrar num aparelho não desconecta os outros.
 const hash = (t) => crypto.createHash('sha256').update(t).digest('hex');
+const tokenDo = (cookies) => { const t = cookies?.[COOKIE]; return t && t.length <= 100 ? hash(t) : null; };
+const gravarCookie = (reply, token) => reply.setCookie(COOKIE, token, { path: '/', httpOnly: true, sameSite: 'lax', secure: COOKIE_SEGURO, maxAge: 365 * 24 * 3600 });
 
+async function sessaoDoCookie(cookies) {
+  const h = tokenDo(cookies); if (!h) return null;
+  return (await pool.query('SELECT id, conta_id, perfil_id FROM sessoes WHERE token_hash = $1', [h])).rows[0] || null;
+}
+// O perfil que joga neste aparelho. Sem conta, ou sem perfil escolhido, nada além do jogo sozinho.
 async function jogadorDoCookie(cookies) {
-  const t = cookies?.[COOKIE];
-  if (!t || t.length > 100) return null;
-  const r = await pool.query('SELECT id, apelido, ficha FROM jogadores WHERE token_hash = $1', [hash(t)]);
+  const h = tokenDo(cookies); if (!h) return null;
+  const r = await pool.query(
+    'SELECT j.id, j.apelido, j.ficha, j.nivel, j.conta_id FROM sessoes s JOIN jogadores j ON j.id = s.perfil_id WHERE s.token_hash = $1', [h]);
   return r.rows[0] || null;
 }
+// Jogador criado antes da conta do responsável (só apelido e ficha): vira um perfil quando um responsável
+// entra com o e-mail neste aparelho, e assim o histórico dele não se perde.
+async function jogadorSemContaDoCookie(cookies) {
+  const h = tokenDo(cookies); if (!h) return null;
+  return (await pool.query('SELECT id FROM jogadores WHERE token_hash = $1 AND conta_id IS NULL', [h])).rows[0] || null;
+}
+async function abrirSessao(reply, contaId, perfilId) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  await pool.query('INSERT INTO sessoes (token_hash, conta_id, perfil_id) VALUES ($1, $2, $3)', [hash(token), contaId, perfilId]);
+  gravarCookie(reply, token);
+}
+// Só para o jogador de antes da conta do responsável que volta pelo código de recuperação.
+async function emitirCookieLegado(reply, jogadorId) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  await pool.query('UPDATE jogadores SET token_hash = $2 WHERE id = $1', [jogadorId, hash(token)]);
+  gravarCookie(reply, token);
+}
+const sairDoAparelho = (reply) => reply.clearCookie(COOKIE, { path: '/', httpOnly: true, sameSite: 'lax', secure: COOKIE_SEGURO });
 
 const IDS_INSIGNIAS = new Set(E.INSIGNIAS.map((i) => i.id));
 const insigniasDe = async (id) => (await pool.query('SELECT insignia FROM insignias WHERE jogador_id = $1 ORDER BY ganha_em', [id])).rows.map((r) => r.insignia);
 
-// Troca o cookie do jogador por um novo (usado na recuperação por código).
-async function emitirCookie(reply, jogadorId) {
-  const token = crypto.randomBytes(32).toString('base64url');
-  await pool.query('UPDATE jogadores SET token_hash = $2 WHERE id = $1', [jogadorId, hash(token)]);
-  reply.setCookie(COOKIE, token, { path: '/', httpOnly: true, sameSite: 'lax', secure: COOKIE_SEGURO, maxAge: 365 * 24 * 3600 });
-}
-
 app.get('/api/eu', async (req) => {
-  const j = await jogadorDoCookie(req.cookies);
+  const s = await sessaoDoCookie(req.cookies);
+  const j = s?.perfil_id ? await jogadorDoCookie(req.cookies) : null;
   return {
-    jogador: j ? { apelido: j.apelido, ficha: j.ficha } : null,
+    jogador: j ? { apelido: j.apelido, ficha: j.ficha, nivel: j.nivel } : null,
+    conta: !!s, perfilId: j?.id || null,   // conta sem perfil escolhido: a tela pergunta quem vai jogar
     insignias: j ? await insigniasDe(j.id) : [],
-    config: { rodadas: RODADAS_OPCOES, rodadasPadrao: RODADAS_PADRAO },
+    config: { rodadas: RODADAS_OPCOES, rodadasPadrao: RODADAS_PADRAO, emailLigado: modoEmail() !== 'desligado' },
   };
 });
 
+// Troca o apelido e a ficha do perfil escolhido. A conta só nasce em /api/conta/entrar, pelo responsável.
 app.post('/api/eu', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+  const j = await jogadorDoCookie(req.cookies);
+  if (!j) return reply.code(401).send({ erro: SEM_CONTA });
   const apelido = limparApelido(req.body?.apelido);
   const ficha = String(req.body?.ficha || '');
   if (apelido.length < 2) return reply.code(400).send({ erro: 'O apelido precisa ter de 2 a 20 letras ou números.' });
   if (apelidoProibido(apelido)) return reply.code(400).send({ erro: 'Esse apelido não pode ser usado. Escolha outro.' });
   if (!FICHAS.some((f) => f.id === ficha)) return reply.code(400).send({ erro: 'Escolha uma das fichas.' });
-  const j = await jogadorDoCookie(req.cookies);
-  if (j) {
-    await pool.query('UPDATE jogadores SET apelido = $2, ficha = $3 WHERE id = $1', [j.id, apelido, ficha]);
-  } else {
-    const token = crypto.randomBytes(32).toString('base64url');
-    await pool.query('INSERT INTO jogadores (token_hash, apelido, ficha) VALUES ($1, $2, $3)', [hash(token), apelido, ficha]);
-    reply.setCookie(COOKIE, token, { path: '/', httpOnly: true, sameSite: 'lax', secure: COOKIE_SEGURO, maxAge: 365 * 24 * 3600 });
-  }
-  return { jogador: { apelido, ficha } };
+  const nivel = req.body?.nivel === undefined ? j.nivel : String(req.body.nivel);   // sem o campo, o nível fica como está
+  if (!E.NIVEIS[nivel]) return reply.code(400).send({ erro: 'Escolha o nível: Lobinho ou Escoteiro em diante.' });
+  await pool.query('UPDATE jogadores SET apelido = $2, ficha = $3, nivel = $4 WHERE id = $1', [j.id, apelido, ficha, nivel]);
+  return { jogador: { apelido, ficha, nivel } };
 });
 
 app.post('/api/salas', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
   const j = await jogadorDoCookie(req.cookies);
-  if (!j) return reply.code(401).send({ erro: 'Escolha um apelido e uma ficha antes de criar a sala.' });
+  if (!j) return reply.code(401).send({ erro: SEM_CONTA });
   const sala = await S.criarSalaCodigo(j, Number(req.body?.rodadas));
   return { codigo: sala.codigo };
 });
@@ -107,7 +133,7 @@ const inteiro = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
 // E3: últimas 20 partidas, recorde de cada modo e insígnias.
 app.get('/api/minha-trilha', async (req, reply) => {
   const j = await jogadorDoCookie(req.cookies);
-  if (!j) return reply.code(401).send({ erro: 'Entre no jogo com um apelido primeiro.' });
+  if (!j) return reply.code(401).send({ erro: SEM_CONTA });
   const partidas = (await pool.query(
     `SELECT modo, pontos, saldo, quando FROM (
        SELECT s.tipo AS modo, p.pontos, p.saldo_bc AS saldo, p.atualizado_em AS quando
@@ -133,7 +159,7 @@ app.get('/api/minha-trilha', async (req, reply) => {
 // e a gravação ignora repetição, então reenviar é seguro.
 app.post('/api/solo', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
   const j = await jogadorDoCookie(req.cookies);
-  if (!j) return reply.code(401).send({ erro: 'Sem apelido.' });
+  if (!j) return reply.code(401).send({ erro: SEM_CONTA });
   const b = req.body || {};
   const ok = typeof b.id === 'string' && /^[0-9a-f-]{36}$/i.test(b.id) && inteiro(b.pontos, 0, 1000) && inteiro(b.saldo, 0, E.SALDO_MAX)
     && inteiro(b.acertos, 0, 60) && inteiro(b.kit, 0, E.ITENS.length) && E.RODADAS_OPCOES.includes(b.rodadas)
@@ -153,7 +179,7 @@ app.post('/api/solo', { config: { rateLimit: { max: 30, timeWindow: '1 minute' }
 // recebidas e só aceita o resultado que ele mesmo calcular.
 app.post('/api/desafio', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
   const j = await jogadorDoCookie(req.cookies);
-  if (!j) return reply.code(401).send({ erro: 'Sem apelido.' });
+  if (!j) return reply.code(401).send({ erro: SEM_CONTA });
   const { dia, acoes } = req.body || {};
   if (!diaAceito(dia)) return reply.code(400).send({ erro: 'Esse desafio já fechou.' });
   const r = E.rodarDesafio(dia, acoes);
@@ -175,16 +201,17 @@ app.get('/api/desafio/ranking', async (req, reply) => {
   const dia = req.query?.dia || diaSP();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return reply.code(400).send({ erro: 'Dia inválido.' });
   const j = await jogadorDoCookie(req.cookies);
+  if (!j) return reply.code(401).send({ erro: SEM_CONTA });
   const top = (await pool.query(
     `SELECT j.apelido, j.ficha, d.pontos, d.saldo_bc AS saldo, (d.jogador_id = $2) AS eu
        FROM desafios_dia d JOIN jogadores j ON j.id = d.jogador_id
-      WHERE d.dia = $1 ORDER BY d.pontos DESC, d.saldo_bc DESC, d.enviado_em LIMIT 20`, [dia, j?.id || null])).rows;
+      WHERE d.dia = $1 ORDER BY d.pontos DESC, d.saldo_bc DESC, d.enviado_em LIMIT 20`, [dia, j.id])).rows;
   const total = Number((await pool.query('SELECT count(*) FROM desafios_dia WHERE dia = $1', [dia])).rows[0].count);
-  const meu = j ? (await pool.query('SELECT pontos FROM desafios_dia WHERE dia = $1 AND jogador_id = $2', [dia, j.id])).rows[0] : null;
+  const meu = (await pool.query('SELECT pontos FROM desafios_dia WHERE dia = $1 AND jogador_id = $2', [dia, j.id])).rows[0];
   return { dia, hoje: diaSP(), total, top, jogou: !!meu };
 });
 
-rotasConta(app, { pool, jogadorDoCookie, emitirCookie, diaSP });
+rotasConta(app, { pool, sessaoDoCookie, jogadorDoCookie, jogadorSemContaDoCookie, abrirSessao, emitirCookieLegado, sairDoAparelho, diaSP });
 
 app.get('/api/saude', async () => {
   await pool.query('SELECT 1');
@@ -192,6 +219,9 @@ app.get('/api/saude', async () => {
 });
 
 // ---------- Tempo real ----------
+// Um perfil joga em um aparelho por vez: quando ele abre a conexão das salas em outro aparelho, o
+// anterior sai da sala ou da fila (sem perder a conta) e a partida continua no aparelho novo.
+const jogandoEm = new Map();   // id do perfil -> conexão do aparelho que está jogando
 app.register(async (f) => {
   f.get('/ws', { websocket: true }, (ws, req) => {
     // O handler é registrado já, e as mensagens esperam a identificação do jogador.
@@ -200,8 +230,14 @@ app.register(async (f) => {
     let fila = Promise.resolve();
     let janela = Date.now(), contagem = 0;
     pronto.then((j) => {
-      if (!j) { ws.send(JSON.stringify({ t: 'erro', msg: 'Escolha um apelido primeiro.' })); ws.close(); return; }
+      if (!j) { ws.send(JSON.stringify({ t: 'erro', msg: SEM_CONTA })); ws.close(); return; }
       jog = j; ws.jogadorId = j.id;
+      const antes = jogandoEm.get(j.id);
+      if (antes && antes !== ws && antes.readyState === 1) {
+        antes.send(JSON.stringify({ t: 'outro_aparelho', msg: `${j.apelido} começou a jogar em outro aparelho.` }));
+        antes.close(4001);
+      }
+      jogandoEm.set(j.id, ws);
     }).catch(() => ws.close());
     ws.on('message', (raw) => {
       if (Date.now() - janela > 1000) { janela = Date.now(); contagem = 0; }
@@ -211,12 +247,16 @@ app.register(async (f) => {
       // Uma mensagem de cada vez por conexão, na ordem em que chegaram.
       fila = fila.then(() => pronto).then(() => (jog ? tratar(m) : null));
     });
-    ws.on('close', () => pronto.then(() => S.desconectar(ws, jog)));
+    ws.on('close', () => pronto.then(() => {
+      if (jog && jogandoEm.get(jog.id) === ws) jogandoEm.delete(jog.id);
+      S.desconectar(ws, jog);
+    }));
 
     async function tratar(m) {
       try {
         // O apelido e a ficha podem ter mudado desde a conexão.
-        const atual = (await pool.query('SELECT id, apelido, ficha FROM jogadores WHERE id = $1', [jog.id])).rows[0] || jog;
+        const atual = (await pool.query('SELECT id, apelido, ficha, nivel FROM jogadores WHERE id = $1', [jog.id])).rows[0];
+        if (!atual) { ws.close(); return; }   // a conta foi apagada
         switch (m.t) {
           case 'entrar': return await S.entrarNaSala(ws, atual, m.codigo);
           case 'sair_sala': return S.sairDaSalaAtual(ws);

@@ -58,6 +58,7 @@ Só para desenvolvimento e testes: `ws` 8.22.0 (MIT), https://github.com/websock
 | `node:22-alpine` | Servidor do jogo | Node.js: MIT (a imagem inclui pacotes do Alpine com licenças próprias) |
 | `postgres:16-alpine` | Banco e backup | PostgreSQL License |
 | `nginx:1.27-alpine` | HTTPS e arquivos estáticos | BSD-2-Clause |
+| `alpine:3.20` | Limpeza dos registros de acesso com mais de 6 meses | Pacotes do Alpine com licenças próprias (BusyBox: GPL-2.0) |
 
 ### Imagens, sons, ícones e fontes
 

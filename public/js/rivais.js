@@ -109,10 +109,10 @@ export function rivaisJogam(ctx, rng) {
 }
 
 /** Monta o contexto do jogo sozinho com os 3 rivais: uma sala de verdade, só que dentro do aparelho. */
-export function novoJogoSolo({ apelido, ficha, rodadas, seed, vistas = [] }) {
+export function novoJogoSolo({ apelido, ficha, rodadas, seed, vistas = [], nivel }) {
   const ctx = E.novoContexto({});
   ctx.missao = E.missaoDaPartida(seed);
-  ctx.estados.set('eu', E.novoJogador({ apelido, ficha, rodadas, seed, ordem: 0, sala: true, vistas }));
-  RIVAIS.forEach((r, i) => ctx.estados.set(r.id, E.novoJogador({ apelido: r.apelido, ficha: r.ficha, rodadas, seed, ordem: i + 1, sala: true })));
+  ctx.estados.set('eu', E.novoJogador({ apelido, ficha, rodadas, seed, ordem: 0, sala: true, vistas, nivel }));
+  RIVAIS.forEach((r, i) => ctx.estados.set(r.id, E.novoJogador({ apelido: r.apelido, ficha: r.ficha, rodadas, seed, ordem: i + 1, sala: true, nivel })));
   return ctx;
 }

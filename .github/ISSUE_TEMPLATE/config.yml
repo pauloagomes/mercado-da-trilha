@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Falha de segurança
+    url: https://github.com/pauloagomes/mercado-da-trilha/security/advisories/new
+    about: Não abra Issue pública. Use o reporte privado, como explica o SECURITY.md.
+  - name: Pedido sobre uma conta (dados, e-mail, apagar)
+    url: https://github.com/pauloagomes/mercado-da-trilha/blob/main/PRIVACY.md
+    about: Abra uma Issue dizendo só que é um pedido sobre uma conta, sem e-mail nem apelido. Combinamos um canal privado.
