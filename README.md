@@ -148,6 +148,16 @@ O HTML, o JavaScript e o CSS saem com `Cache-Control: no-cache`: o navegador con
 
 Para atualizar o jogo: `git pull && docker compose up -d --build`.
 
+### Servidor que já tem um proxy com HTTPS
+
+Se o servidor já tem um nginx (ou outro proxy) cuidando do HTTPS, pule os passos 3 e 5 e suba com o `docker-compose.proxy.yml`. O nginx do jogo deixa as portas 80 e 443 e escuta só em `127.0.0.1:3070` (troque com `PORTA_PROXY` no `.env`), em HTTP, com as mesmas rotas, cabeçalhos e registros de acesso:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d --build
+```
+
+O proxy da frente repassa tudo para `http://127.0.0.1:3070` e precisa mandar `X-Forwarded-For $remote_addr` (sobrescrever, não somar, para o IP do registro de acesso ser o do visitante) e o `Upgrade`/`Connection` na rota `/ws`, que é WebSocket.
+
 ### Variáveis de ambiente
 
 | Variável | Padrão | Para quê |
