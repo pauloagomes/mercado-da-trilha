@@ -26,6 +26,10 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-1}
       SERVIR_ESTATICOS: "0"
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    # O log do app fica no Docker com tamanho limitado. Os registros de acesso com prazo são os do nginx.
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
 
   nginx:
     image: nginx:1.27-alpine
@@ -42,6 +46,24 @@ services:
       - ./public:/usr/share/nginx/html:ro
       - ./certbot/conf:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
+      - registros:/var/log/nginx/acesso
+    # A pasta dos registros de acesso precisa ser do usuário nginx, que é quem escreve nela.
+    entrypoint: ["sh", "-c", "chown nginx /var/log/nginx/acesso && exec /docker-entrypoint.sh nginx -g 'daemon off;'"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  # Registros de acesso: guardados por 6 meses (Marco Civil, art. 15) e apagados depois disso.
+  # Um arquivo por dia; copie a pasta para fora do servidor junto com os backups.
+  registros:
+    image: alpine:3.20
+    restart: unless-stopped
+    volumes:
+      - registros:/registros
+    entrypoint: >
+      sh -c 'while true; do
+        find /registros -name "acesso-*.log" -mtime +183 -delete;
+        sleep 86400; done'
 
   backup:
     image: postgres:16-alpine
@@ -61,3 +83,4 @@ services:
 
 volumes:
   pgdata:
+  registros:

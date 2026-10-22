@@ -10,12 +10,12 @@ import * as E from '../public/js/engine.js';
 
 await migrar({ info() {} });
 
-async function novoJogador(apelido) {
+async function novoJogador(apelido, nivel = 'escoteiro') {
   const r = await pool.query(
-    'INSERT INTO jogadores (token_hash, apelido, ficha) VALUES ($1, $2, $3) RETURNING id',
-    [crypto.randomUUID(), apelido, 'f01'],
+    'INSERT INTO jogadores (token_hash, apelido, ficha, nivel) VALUES ($1, $2, $3, $4) RETURNING id',
+    [crypto.randomUUID(), apelido, 'f01', nivel],
   );
-  return { id: r.rows[0].id, apelido, ficha: 'f01' };
+  return { id: r.rows[0].id, apelido, ficha: 'f01', nivel };
 }
 function falso(jog) {
   return { readyState: 1, jogadorId: jog.id, msgs: [], send(m) { this.msgs.push(JSON.parse(m)); },
@@ -304,6 +304,22 @@ try {
   } finally {
     for (const c of criadas4) await pool.query('DELETE FROM salas WHERE codigo = $1', [c]);
   }
+  // ---- Nível do perfil: o baralho de cada jogador da sala segue o nível dele
+  const lobo = await novoJogador('Lobo', 'lobinho'), esco = await novoJogador('Esco', 'escoteiro');
+  const salaNivel = await S.criarSalaCodigo(lobo, 8);
+  await S.entrarNaSala(falso(lobo), lobo, salaNivel.codigo);
+  await S.entrarNaSala(falso(esco), esco, salaNivel.codigo);
+  const pl = salaNivel.jogadores.get(lobo.id).st, pe = salaNivel.jogadores.get(esco.id).st;
+  const todosIds = (st) => [...st.baralho.bussola, ...st.baralho.tempestade];
+  assert.deepEqual([pl.nivel, pe.nivel], ['lobinho', 'escoteiro']);
+  assert.ok(todosIds(pl).includes('salarecusa') && !todosIds(pe).includes('salarecusa'), 'a Fila na cantina só sai para o Lobinho');
+  assert.ok(todosIds(pl).every((id) => E.cartaPorId(id).nivel !== 'escoteiro'));
+  assert.ok(todosIds(pe).every((id) => E.cartaPorId(id).nivel !== 'lobinho'));
+  const [{ estado }] = await rows('SELECT estado FROM participacoes WHERE jogador_id = $1 AND sala_codigo = $2', [lobo.id, salaNivel.codigo]);
+  assert.equal(estado.nivel, 'lobinho', 'o nível fica gravado no estado da participação');
+  await pool.query('DELETE FROM salas WHERE codigo = $1', [salaNivel.codigo]);
+  await pool.query('DELETE FROM jogadores WHERE id = ANY($1)', [[lobo.id, esco.id]]);
+  console.log('nível do perfil nas salas ok');
   console.log('INTEGRAÇÃO OK');
 } catch (e) {
   console.error(e);

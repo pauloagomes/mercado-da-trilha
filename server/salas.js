@@ -18,7 +18,7 @@ const INTERVALO_MS = () => ms('INTERVALO_MS', E.VOTO_S * 1000);
 const INATIVIDADE_MS = () => ms('INATIVIDADE_MS', 2 * 60 * 60 * 1000);
 
 const salas = new Map();           // codigo -> Sala
-const fila = new Map();            // jogadorId -> { id, apelido, ficha, desde, ws }
+const fila = new Map();            // jogadorId -> { id, apelido, ficha, nivel, desde, ws }
 let filaInicioEm = null;
 let filaTimer = null;
 let log = console;
@@ -87,7 +87,7 @@ async function inserirSala(tipo, rodadas, anfitriao) {
 async function adicionarJogador(sala, jog) {
   const ordem = sala.jogadores.size;
   const cor = CORES[ordem % CORES.length];
-  const st = E.novoJogador({ apelido: jog.apelido, ficha: jog.ficha, rodadas: sala.rodadas, seed: sala.semente, ordem, sala: true });
+  const st = E.novoJogador({ apelido: jog.apelido, ficha: jog.ficha, rodadas: sala.rodadas, seed: sala.semente, ordem, sala: true, nivel: jog.nivel });
   st.saida = [];
   const r = await pool.query(
     `INSERT INTO participacoes (sala_codigo, jogador_id, ordem, cor, saldo_bc, estado, meta)
@@ -219,7 +219,7 @@ function infoSala(sala, paraId) {
     rodadaSync: sala.rodadaSync, fimRodadaEm: sala.fimRodadaEm, agora: Date.now(),
     souAnfitriao: sala.anfitriao === paraId,
     baseMs: RODADA_MS(),
-    missao: { nome: E.missaoPorId(sala.missao.id).nome, desc: E.descreverMissao(sala.missao), pts: E.MISSAO_PTS,
+    missao: { nome: E.missaoPorId(sala.missao.id).nome, itens: E.missaoPorId(sala.missao.id).itens, desc: E.descreverMissao(sala.missao), pts: E.MISSAO_PTS,
       vencedor: sala.missao.vencedor ? sala.jogadores.get(sala.missao.vencedor)?.st.apelido || null : null },
     ofertas: lista.filter((p) => p !== sala.jogadores.get(paraId) && E.ofertaAtiva(p.st)).map((p) => ({
       de: p.ordem, apelido: p.st.apelido, dar: p.st.oferta.dar, querer: p.st.oferta.querer,
@@ -632,7 +632,7 @@ export function entrarNaFila(ws, jog) {
   sairDaSalaAtual(ws);
   const atual = fila.get(jog.id);
   if (atual && atual.ws !== ws) enviar(atual.ws, { t: 'fila_saiu', msg: 'Você entrou na fila por outro aparelho.' });
-  fila.set(jog.id, { id: jog.id, apelido: jog.apelido, ficha: jog.ficha, desde: atual?.desde || Date.now(), ws });
+  fila.set(jog.id, { id: jog.id, apelido: jog.apelido, ficha: jog.ficha, nivel: jog.nivel, desde: atual?.desde || Date.now(), ws });
   ws.naFila = true;
   recalcularFila();
 }
@@ -663,7 +663,7 @@ async function abrirPartidaEspera(escolhidos, aviso) {
       let ficha = f.ficha;
       if (usadas.has(ficha)) ficha = E.FICHAS.find((x) => !usadas.has(x.id)).id;
       usadas.add(ficha);
-      const p = await adicionarJogador(sala, { id: f.id, apelido: f.apelido, ficha });
+      const p = await adicionarJogador(sala, { id: f.id, apelido: f.apelido, ficha, nivel: f.nivel });
       if (ficha !== f.ficha) p.st.avisos.push({ tipo: 'info', texto: 'Sua ficha já tinha sido escolhida por outro jogador, então você ganhou outra nesta partida.' });
       sairDaSalaAtual(f.ws);
       f.ws.salaCodigo = sala.codigo;
@@ -730,7 +730,7 @@ export async function pedirRevanche(ws, jog) {
     if (sala.anfitriao !== jog.id) return enviar(ws, { t: 'erro', msg: 'Só o anfitrião reabre a sala.' });
     if (sala.revancheCodigo) return;
     if (sala.status === 'aberta') await encerrarSala(sala, 'O anfitrião reabriu a sala para a revanche.');
-    const nova = await criarSalaCodigo({ id: jog.id, apelido: jog.apelido, ficha: jog.ficha }, sala.rodadas);
+    const nova = await criarSalaCodigo({ id: jog.id, apelido: jog.apelido, ficha: jog.ficha, nivel: jog.nivel }, sala.rodadas);
     sala.revancheCodigo = nova.codigo;
     for (const s of [...sala.sockets]) {
       if (s === ws) await entrarNaSala(ws, jog, nova.codigo);
@@ -753,7 +753,7 @@ async function fecharRevanche(sala) {
   clearTimeout(r.timer); sala.revanche = null; sala.revancheFeita = true;
   const escolhidos = [...r.aceitos].filter(([, w]) => w.readyState === 1).map(([id, w]) => {
     const p = sala.jogadores.get(id);
-    return { id, apelido: p.st.apelido, ficha: p.st.ficha, ws: w };
+    return { id, apelido: p.st.apelido, ficha: p.st.ficha, nivel: p.st.nivel, ws: w };
   }).slice(0, MAX_ESPERA);
   if (escolhidos.length < 2) {
     sala.revancheFeita = false;
