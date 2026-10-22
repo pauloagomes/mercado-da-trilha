@@ -741,9 +741,13 @@ export function dadoDuplo(st, rng = Math.random) {
     if (st.saldo < DADO_DUPLO_CUSTO) return { erro: `O dado duplo custa ${DADO_DUPLO_CUSTO} BC e você tem ${st.saldo} BC.` };
     debitar(st, DADO_DUPLO_CUSTO, 'Dado duplo', 'dado');
   }
-  st.rolou = true; st.resposta = null; st.feito = false;
+  st.rolou = true; st.resposta = null; st.feito = false; st.dado = null;
   st.stats.duplos += 1;
-  const a = 1 + Math.floor(rng() * 6), b = 1 + Math.floor(rng() * 6);
+  // O segundo dado nunca repete o primeiro: sorteia entre as 5 faces que sobram,
+  // com a mesma chance para cada uma e um só número do gerador (sem laço).
+  const a = 1 + Math.floor(rng() * 6);
+  let b = 1 + Math.floor(rng() * 5);
+  if (b >= a) b += 1;
   st.pend = { tipo: 'dado', dados: [a, b] };
   st.cena.push({ t: 'dado', v: [a, b] });
   st.ultimo = `Dado duplo: saiu ${a} e ${b}. Escolha um.`;

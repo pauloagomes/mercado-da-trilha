@@ -39,7 +39,38 @@ Já existem `LICENSE` (MIT, Paulo Afonso Gomes Fernandes Consultoria em Tecnolog
 - [x] Repositório público em https://github.com/pauloagomes/mercado-da-trilha desde 21/10/2026 (`main` e esta branch, PR #1). Antes de publicar, o histórico foi conferido: sem `.env`, segredos, IPs ou e-mails reais.
 - [ ] Traduções: o `CONTRIBUTING.md` aceita traduções, mas os textos da interface estão escritos direto no código, sem um sistema de tradução.
 - [ ] Opcional: modelos de Issue e de Pull Request em `.github/`, com os campos que o `CONTRIBUTING.md` pede.
+- [ ] **Regra contra rastreamento.** Escrever no `CONTRIBUTING.md` e no `PRIVACY.md` que o jogo não aceita nenhum meio de monitorar ou rastrear quem joga: ferramentas de análise de terceiros, pixels de anúncio, impressão digital do aparelho, gravação de sessão, localização ou envio de dados para fora do servidor do projeto. Pull Request que traga algo assim é recusado. Os contadores anônimos de `server/metricas.js` continuam permitidos, desde que não identifiquem ninguém.
 
 ## Política de uso
 
 Foi para o `PRIVACY.md`, seção "Como o Mercado da Trilha trata os dados" (conta do responsável, cookie `mt_token`, armazenamento no aparelho, registros de acesso e contadores anônimos). Revisar com o jurídico antes de publicar.
+
+
+
+## ajustes visuais
+- [x] Ajustes visuais
+Cada quadrado, trazer um visual de pedra, como se fosse um caminho.
+Crie uma animação para a fogueira quando estiver acessa.
+
+Compactação do Topo: As informações e botões de controle foram unificados em uma linha sutil e elegante.
+
+Tabuleiro Otimizado: Ele foi adaptado para o formato mobile, usando o centro com a clareira em 3D e focando as casas em ícones coloridos para preservar o espaço, tirando textos longos e tornando o tabuleiro ideal para toques rápidos.
+
+Balão Temporário: A mensagem "Tirou 5 e caiu em Partida" agora aparece como um balão de fala leve, dinâmico e focado no peão do jogador, sem criar um grande bloco estático extra.
+
+Objetivo Expansível: A "Missão da Sala" foi recolhida em uma aba moderna e discreta, que pode ser tocada para ler detalhes e não fica obstruindo a jogabilidade principal.
+
+Ações Próximas ao Polegar: Toda a mecânica de jogo ("Rolar o Dado", "Dado Duplo") agora fica na área mais acessível do celular (o terço inferior), com botões grandes, de alta visibilidade e visual tátil.
+
+Inventário Ilustrado: O "Kit de Acampamento" agora usa ícones ao invés de textos, com cada item acendendo à medida que é conquistado, sendo uma solução muito mais rápida de ler em uma tela menor.
+
+O formato de pedra utilizado no tabuleiro assemelha-se a lajes espessas ou blocos de pavimentação rústica, esculpidos em formatos retangulares e quadrados. Os rebordos destas pedras são irregulares, arredondados e ligeiramente lascados, o que transmite uma sensação de desgaste natural pelo tempo, fugindo a linhas perfeitamente retas e artificiais.   A textura da superfície é visivelmente porosa e fosca, com pequenos relevos e fissuras que lembram materiais como a ardósia natural ou rochas graníticas. Embora a base dos blocos apresente um tom cinzento-escuro rochoso, o topo de cada pedra reflete suavemente a cor específica da sua respetiva casa no jogo (como verde, amarelo, roxo ou azul), integrando também os reflexos quentes e alaranjados projetados pela fogueira e pelas tochas próximas.   No centro do cenário, o anel da fogueira utiliza um formato de pedra distinto: trata-se de pedregulhos menores, totalmente brutos, assimétricos e não lapidados, dispostos de forma muito mais orgânica e sobreposta para conter o fogo no solo de terra. 
+
+- [x] ao jogar dado duplo e cair dois iguais, jogar o segundo automaticamente até cair um número diferente.
+
+- [x] ao clicar ou selecionar alguma ficha trazer ao centro e mostrar as informações da imagem, apelido e pontuação.
+
+- [x] colocar uma animação na fogueira quando o cenário estiver exibindo.
+
+- [x] colocar sons nas ações, acertos e erros, e colocar uma trila de fundo.
+
