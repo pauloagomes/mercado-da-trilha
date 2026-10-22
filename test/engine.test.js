@@ -135,6 +135,21 @@ test('B1: dado duplo custa 5 BC, rola dois dados e deixa escolher um', () => {
   assert.match(E.rolar(st).erro, /já jogou/);
 });
 
+test('B1: dado duplo nunca tira dois números iguais', () => {
+  // O segundo dado sorteia entre as 5 faces que sobram: 0 a 4 viram 1, 2, 4, 5, 6 quando o primeiro é 3.
+  const quinto = (k) => k / 5 + 0.01;
+  const faces = [0, 1, 2, 3, 4].map((k) => {
+    const st = E.novoJogador({ apelido: 'Ana', ficha: 'f01', seed: 1 });
+    assert.ok(E.dadoDuplo(st, seq(dado(3), quinto(k))).ok);
+    return st.pend.dados;
+  });
+  assert.deepEqual(faces, [[3, 1], [3, 2], [3, 4], [3, 5], [3, 6]]);
+  // Mesmo com um gerador que sempre devolve o mesmo valor, termina e os dados saem diferentes.
+  const st = E.novoJogador({ apelido: 'Bia', ficha: 'f01', seed: 1 });
+  assert.ok(E.dadoDuplo(st, () => 0.5).ok);
+  assert.notEqual(st.pend.dados[0], st.pend.dados[1]);
+});
+
 test('B1: dado duplo recusado sem 5 BC e parado só passa a rodada', () => {
   const st = E.novoJogador({ apelido: 'Bia', ficha: 'f01', seed: 1 });
   st.saldo = 4;

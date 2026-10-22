@@ -4,6 +4,17 @@
 import * as E from './engine.js';
 import * as R from './rivais.js';
 
+// Ícones SVG para cada item do kit (usados no inventário ilustrado)
+const ITEM_IC = {  // svg.ic: herda tamanho e cor do estado (falta = apagado, no kit = cor da loja)
+  corda: '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12c0-4.4 3.6-8 8-8s8 3.6 8 8-3.6 8-8 8" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" fill="none" stroke-width="2"/></svg>',
+  lona: '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 18L12 6l9 12H3z" stroke="currentColor" fill="none" stroke-width="2" stroke-linejoin="round"/><path d="M7.5 18l4.5-6 4.5 6" stroke="currentColor" fill="none" stroke-width="2" stroke-linejoin="round"/></svg>',
+  panela: '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h14v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6z" stroke="currentColor" fill="none" stroke-width="2"/><path d="M3 12h18M8 9c0-1 1-2 4-2s4 1 4 2" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"/></svg>',
+  mapa: '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6.5l6-3 6 3 6-3v14l-6 3-6-3-6 3zM9 3.5v14M15 6.5v14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  bussola: '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="currentColor" fill="none" stroke-width="2"/><path d="M15.5 8.5l-2 5-5 2 2-5z" stroke="currentColor" fill="none" stroke-width="2" stroke-linejoin="round"/></svg>',
+  lanterna: '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5h6l1 5v3H8v-3l1-5zM8 13h8v3H8zM10 16v4h4v-4M10 3v2M14 3v2" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  kitps: '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" fill="none" stroke-width="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M12 11v4M10 13h4" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"/></svg>',
+};
+
 const $ = (s, r = document) => r.querySelector(s);
 const app = $('#app');
 const ic = (id) => `<svg class="ic" aria-hidden="true"><use href="#i-${id}"/></svg>`;
@@ -61,7 +72,7 @@ const S = {
   aguardando: false,     // clicou e espera a resposta (e a animação) para clicar de novo
   cenasN: null,          // última cena já mostrada (null = ainda não sei, não anime o passado)
   soloN: 0, peaoPos: {}, // peaoPos: ordem -> casa onde o peão está desenhado
-  som: ls.get('mt-som', true), reacaoLivreEm: 0,
+  som: ls.get('mt-som', true), musica: ls.get('mt-musica', true), reacaoLivreEm: 0,
   insignias: Object.keys(ls.get('mt-insignias', {})),   // todas as que o jogador já ganhou (aparelho + servidor)
   resultado: null, trilha: null, ranking: null, soloSala: false,
   troca: {}, missaoSolo: null, leitura: ls.get('mt-leitura', 'completa'),   // leitura: 'completa' ou 'curta' (Lobinhos)
@@ -81,7 +92,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---------- Som e vibração (D5): tudo gerado no navegador, sem arquivo para baixar ----------
 let ac = null;
 function audio() {
-  if (!S.som) return null;
+  if (!S.som && !S.musica) return null;
   try {
     ac ||= new (window.AudioContext || window.webkitAudioContext)();
     if (ac.state === 'suspended') ac.resume();
@@ -107,10 +118,12 @@ function ruido(dur, { vol = 0.08, atraso = 0, filtro = 1800 } = {}) {
   src.connect(f).connect(g).connect(a.destination); src.start(a.currentTime + atraso);
 }
 const SONS = {
+  clique: () => tom(680, 0.04, { tipo: 'sine', vol: 0.035 }),
   dado: () => { for (let i = 0; i < 5; i++) ruido(0.05, { atraso: i * 0.1, vol: 0.07, filtro: 900 + i * 300 }); },
   passo: () => tom(520, 0.05, { tipo: 'triangle', vol: 0.05 }),
   moeda: () => { tom(988, 0.09, { tipo: 'square', vol: 0.04 }); tom(1319, 0.2, { tipo: 'square', vol: 0.04, atraso: 0.08 }); },
   gasto: () => tom(330, 0.14, { tipo: 'triangle', vol: 0.1, ate: 220 }),
+  compra: () => { tom(523, 0.08, { tipo: 'triangle', vol: 0.06 }); tom(659, 0.12, { tipo: 'triangle', vol: 0.06, atraso: 0.06 }); },
   recusa: () => tom(160, 0.3, { tipo: 'sawtooth', vol: 0.06, ate: 110 }),
   certa: () => [523, 659, 784].forEach((f, i) => tom(f, 0.14, { tipo: 'triangle', vol: 0.08, atraso: i * 0.09 })),
   errada: () => tom(260, 0.25, { tipo: 'triangle', vol: 0.08, ate: 170 }),
@@ -127,9 +140,61 @@ function alternarSom() {
   if (S.som) som('moeda');
   document.querySelectorAll('.btn-som').forEach((b) => { b.setAttribute('aria-pressed', S.som); b.innerHTML = botaoSomHtml(); });
 }
-const botaoSomHtml = () => `${ic(S.som ? 'som' : 'mudo')}<span>Som ${S.som ? 'ligado' : 'desligado'}</span>`;
-const botaoSom = () => `<button class="btn sm btn-som" aria-pressed="${S.som}" title="Ligar ou desligar o som">${botaoSomHtml()}</button>`;
-document.addEventListener('click', (e) => { if (e.target.closest('.btn-som')) alternarSom(); });
+const botaoSomHtml = () => `${ic(S.som ? 'som' : 'mudo')}<span class="rot">Som</span>`;
+const botaoSom = () => `<button class="btn sm btn-som" aria-pressed="${S.som}" aria-label="Efeitos sonoros" title="Ligar ou desligar os efeitos sonoros">${botaoSomHtml()}</button>`;
+
+// Trilha sonora de fundo (música de acampamento em Web Audio puro, leve e ambiente)
+let musicaInterval = null;
+const NOTAS_ACAMPAMENTO = [
+  261.63, 329.63, 392.00, 523.25,
+  293.66, 349.23, 440.00, 587.33,
+  329.63, 392.00, 493.88, 659.25,
+  261.63, 392.00, 523.25, 659.25
+];
+let notaIdx = 0;
+function tocarPassoMusica() {
+  if (!S.musica) return;
+  const a = audio(); if (!a || a.state !== 'running') return;
+  const f = NOTAS_ACAMPAMENTO[notaIdx % NOTAS_ACAMPAMENTO.length];
+  notaIdx++;
+  tom(f, 0.45, { tipo: 'sine', vol: 0.015 });
+  if (Math.random() < 0.25) {
+    ruido(0.03, { vol: 0.008, filtro: 1400 });
+  }
+}
+function iniciarMusica() {
+  if (musicaInterval) clearInterval(musicaInterval);
+  if (!S.musica) return;
+  musicaInterval = setInterval(tocarPassoMusica, 700);
+}
+function pararMusica() {
+  if (musicaInterval) { clearInterval(musicaInterval); musicaInterval = null; }
+}
+function alternarMusica() {
+  S.musica = !S.musica; ls.set('mt-musica', S.musica);
+  if (S.musica) { audio(); iniciarMusica(); } else { pararMusica(); }
+  document.querySelectorAll('.btn-musica').forEach((b) => {
+    b.setAttribute('aria-pressed', S.musica);
+    b.innerHTML = botaoMusicaHtml();
+  });
+}
+const botaoMusicaHtml = () => `<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span><span class="rot">Música</span>`;
+const botaoMusica = () => `<button class="btn sm btn-musica" aria-pressed="${S.musica}" aria-label="Música de fundo" title="Ligar ou desligar a música de fundo">${botaoMusicaHtml()}</button>`;
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.btn-som')) alternarSom();
+  if (e.target.closest('.btn-musica')) alternarMusica();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) pararMusica();
+  else if (S.musica && ac?.state === 'running') iniciarMusica();
+});
+document.addEventListener('click', () => {
+  if (S.musica && !musicaInterval) {
+    const a = audio();
+    if (a) iniciarMusica();
+  }
+}, { once: true });
 
 // ---------- Servidor ----------
 async function api(caminho, corpo) {
@@ -377,15 +442,73 @@ function sincronizarPeoes(placar) {
   for (const el of [...lay.children]) if (!ordens.has(el.dataset.o)) { el.remove(); delete S.peaoPos[el.dataset.o]; }
   for (const p of placar) {
     let el = peao(p.ordem);
-    if (!el) { el = document.createElement('div'); el.dataset.o = p.ordem; el.innerHTML = '<img alt="">'; lay.appendChild(el); }
+    if (!el) {
+      el = document.createElement('div');
+      el.dataset.o = p.ordem;
+      el.innerHTML = '<img alt="">';
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        mostrarDetalhesFicha(S.placar.find((x) => x.ordem === Number(el.dataset.o)));
+      });
+      lay.appendChild(el);
+    }
     el.className = `peao2${p.eu ? ' eu' : ''}`;
     el.style.setProperty('--pc', p.cor);
-    el.title = p.apelido;
+    el.title = `${p.apelido} · ${p.pontos} pts`;
     const img = el.firstChild, src = fichaSrc(p.ficha);
     if (img.getAttribute('src') !== src) img.setAttribute('src', src);
     S.peaoPos[p.ordem] = p.pos;
   }
   layoutPeoes();
+}
+
+// Balão de fala leve, dinâmico e focado no peão do jogador
+function balaoPeao(ordem, texto) {
+  const p = peao(ordem); const board = $('#board');
+  if (!p || !board) return;
+  board.querySelectorAll(`.balao-peao-${ordem}`).forEach((b) => b.remove());
+  const bRect = board.getBoundingClientRect(), pRect = p.getBoundingClientRect();
+  const el = document.createElement('div');
+  el.className = `balao-acao balao-peao-${ordem}`;
+  el.textContent = texto;
+  board.appendChild(el);
+  // A ponta do balão (a 14 px da esquerda) aponta para o peão; o balão inteiro fica dentro do tabuleiro.
+  const cx = pRect.left - bRect.left + pRect.width / 2;
+  const x = Math.max(6, Math.min(bRect.width - el.offsetWidth - 6, cx - 14));
+  const y = Math.max(6, pRect.top - bRect.top - el.offsetHeight - 8);
+  el.style.setProperty('--seta', `${Math.max(8, Math.min(el.offsetWidth - 18, cx - x - 5))}px`);
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  setTimeout(() => el.remove(), 3200);
+}
+
+// Modal ao clicar/selecionar ficha: traz ao centro com imagem, apelido e pontuação
+function mostrarDetalhesFicha(p) {
+  if (!p) return;
+  som('clique');
+  const overlayAnterior = $('#fichaModal');
+  if (overlayAnterior) overlayAnterior.remove();
+  const antes = document.activeElement;
+  const el = document.createElement('div');
+  el.className = 'ficha-modal-overlay';
+  el.id = 'fichaModal';
+  el.innerHTML = `
+    <div class="ficha-modal" role="dialog" aria-modal="true" aria-labelledby="fmNome" style="--pc:${esc(p.cor || 'var(--sun)')}">
+      <img src="${fichaSrc(p.ficha)}" alt="${esc(fichaNome(p.ficha))}">
+      <div class="fm-nome" id="fmNome">${esc(p.apelido)}${p.eu ? ' (você)' : ''}</div>
+      <div class="fm-pts">${p.pontos} pts</div>
+      <div class="fm-info">Ficha: <b>${esc(fichaNome(p.ficha))}</b></div>
+      ${p.saldo != null ? `<div class="fm-info">Saldo: <b>${p.saldo} BC</b> · Kit: <b>${p.kit ?? 0}/7</b></div>` : ''}
+      <button class="btn sm primary" id="fecharFichaModal">Fechar</button>
+    </div>`;
+  document.body.appendChild(el);
+  const fechar = () => { el.remove(); document.removeEventListener('keydown', tecla); antes?.focus?.(); };
+  const tecla = (e) => { if (e.key === 'Escape') fechar(); else if (e.key === 'Tab') { e.preventDefault(); el.querySelector('button').focus(); } };
+  document.addEventListener('keydown', tecla);
+  el.addEventListener('click', (e) => {
+    if (e.target === el || e.target.id === 'fecharFichaModal') fechar();
+  });
+  el.querySelector('button').focus();
 }
 
 // Texto ou moeda que sobe e some sobre um elemento (só transform e opacity).
@@ -476,6 +599,9 @@ const CENAS = {
       if (dir > 0 && pos === 0 && ev.cruzou) flutuar(celula(0), `+${E.MESADA} BC`, 'bom');
       await sleep(reduzir ? 0 : 120);
     }
+    // O andou vem do dado e também das cartas (avance 3, volte 2): o texto vale para os dois.
+    const nomeCasa = E.CASAS[E.TABULEIRO[pos]]?.nome || '';
+    if (n) balaoPeao(ordem, `${dir < 0 ? 'Voltou' : 'Andou'} ${n} ${n === 1 ? 'casa' : 'casas'}: ${nomeCasa}`);
   },
   async credito(ev, ordem, meu) {
     if (!meu) return;
@@ -519,6 +645,7 @@ const CENAS = {
   },
   async gratificacao(ev, ordem, meu) {
     flutuar(peao(ordem), `+${E.GRATIFICACAO} BC`, 'bom');
+    balaoPeao(ordem, `Guardião da ponte: +${E.GRATIFICACAO} BC`);
     if (meu) { await moedasAteSaldo(ordem, 1); }
   },
   async sala(ev, ordem, meu) {
@@ -658,6 +785,7 @@ function publicarSolo(cenas = []) {
 
 function acao(t, extra = {}) {
   if (S.aguardando) return;
+  som('clique');
   if (S.modo === 'sala') {
     S.aguardando = true; atualizarPainel();
     clearTimeout(S.aguardandoT); S.aguardandoT = setTimeout(() => { if (S.aguardando) { S.aguardando = false; atualizarPainel(); } }, 4000);
@@ -668,6 +796,7 @@ function acao(t, extra = {}) {
   for (const x of ctx.estados.values()) E.esvaziarCena(x);
   const r = modo === 'desafio' ? E.passoDoDesafio(ctx, msg) : E.agirNaSala(ctx, 'eu', msg);
   if (r.erro) {
+    som('errada');
     for (const x of ctx.estados.values()) E.esvaziarCena(x);
     if (st.pend?.tipo === 'loja') S.erro = r.erro; else toast(r.erro);
     atualizarJogo(); return;
@@ -821,7 +950,7 @@ function chamas() {
 
 // ---------- Telas ----------
 function topo(extra = '') {
-  return `<header class="top"><div class="wrap"><span class="logo">${ic('moeda')}Mercado da <span>Trilha</span></span>${extra}</div></header>`;
+  return `<header class="top"><div class="wrap"><span class="logo" aria-label="Mercado da Trilha">${ic('moeda')}<span class="logo-txt" aria-hidden="true">Mercado da <span>Trilha</span></span></span>${extra}</div></header>`;
 }
 
 function telaEntrada() {
@@ -839,7 +968,7 @@ function telaEntrada() {
   ];
   return `
   <section class="hero"><div class="wrap">
-    <div class="row" style="justify-content:space-between"><div class="eyebrow" style="color:var(--sun)">Jogo de treino da conta digital</div>${botaoSom()}</div>
+    <div class="row" style="justify-content:space-between"><div class="eyebrow" style="color:var(--sun)">Jogo de treino da conta digital</div><div class="row" style="gap:6px">${botaoSom()}${botaoMusica()}</div></div>
     <h1>Mercado da <span>Trilha</span></h1>
     <p>Monte o Kit de Acampamento gastando BadenCoin (BC) nas barracas. Confira cada gasto, acerte as cartas e termine com o maior número de pontos.</p>
   </div></section>
@@ -925,7 +1054,7 @@ function telaTrilha() {
     <div class="box"><div class="eyebrow">Últimas partidas</div>${t.partidas.length ? `<table class="extrato">${t.partidas.map((p) => `<tr><td>${MODOS[p.modo] || p.modo}</td><td class="v">${p.pontos} pts</td><td class="v muted">${p.saldo} BC</td><td class="v muted">${new Date(p.quando).toLocaleDateString('pt-BR')}</td></tr>`).join('')}</table>` : '<p class="note">Nenhuma partida terminada ainda.</p>'}
       ${t.offline ? '<p class="note">Sem conexão: mostrando só o que está neste aparelho.</p>' : ''}</div>
     ${t.offline ? '<div class="box"><div class="eyebrow">Conta</div><p class="note">O código de recuperação e o quadro de recordes precisam de conexão e de um apelido salvo no servidor.</p></div>' : contaHtml()}`;
-  return `${topo(`<span class="chip">Minha trilha</span><span class="sp"></span>${botaoSom()}<button class="btn sm" id="voltarTrilha">Voltar</button>`)}
+  return `${topo(`<span class="chip">Minha trilha</span><span class="sp"></span>${botaoSom()}${botaoMusica()}<button class="btn sm" id="voltarTrilha">Voltar</button>`)}
   <div class="wrap trilha stack">${corpo}</div>`;
 }
 // ---------- Conta: código de recuperação, e-mail do responsável e quadro de recordes ----------
@@ -979,7 +1108,7 @@ function telaRecordes() {
   const corpo = !q ? '<p class="muted">Carregando…</p>' : q.erro ? '<p class="note">Não foi possível carregar o quadro agora.</p>'
     : `<div class="quadro">${Object.entries(MODOS).map(([k, nome]) => `<div class="box"><div class="eyebrow">${nome}</div>${lista(k)}</div>`).join('')}</div>
       <p class="note">Aparecem só jogadores cujo responsável confirmou o e-mail. Para entrar, abra Minha trilha.</p>`;
-  return `${topo(`<span class="chip">Quadro de recordes</span><span class="sp"></span>${botaoSom()}<button class="btn sm" id="voltarRecordes">Voltar</button>`)}
+  return `${topo(`<span class="chip">Quadro de recordes</span><span class="sp"></span>${botaoSom()}${botaoMusica()}<button class="btn sm" id="voltarRecordes">Voltar</button>`)}
   <div class="wrap trilha stack">${corpo}</div>`;
 }
 function ligarRecordes() { $('#voltarRecordes')?.addEventListener('click', () => { S.quadro = null; ir('entrada'); }); }
@@ -1015,7 +1144,7 @@ async function enviarContador() {
 function telaFila() {
   const f = S.fila, js = f?.jogadores || [], max = f?.max || 8;
   const vagas = Math.max(0, Math.min(max, Math.max(2, js.length + 1)) - js.length);
-  return `${topo(`<span class="chip">Sala de espera</span><span class="sp"></span>${botaoSom()}<button class="btn sm" id="sairFila">Sair da fila</button>`)}
+  return `${topo(`<span class="chip">Sala de espera</span><span class="sp"></span>${botaoSom()}${botaoMusica()}<button class="btn sm" id="sairFila">Sair da fila</button>`)}
   <div class="wrap fila">
     <div class="eyebrow">Sala de espera</div>
     <h2>${f?.inicioEm ? 'A partida começa em' : 'Esperando mais um jogador'}</h2>
@@ -1044,12 +1173,18 @@ function posCasa(i) {
 function montarTabuleiro() {
   const cells = E.TABULEIRO.map((k, i) => {
     const [r, c] = posCasa(i);
-    return `<div class="cell" data-casa="${i}" style="grid-row:${r};grid-column:${c};--t:var(--c-${k})" title="${E.CASAS[k].nome}">${ic(k)}<span class="lbl">${E.CASAS[k].nome}</span><span class="guardiao" hidden></span><span class="farol"></span></div>`;
+    // O reflexo da fogueira entra pelo lado da pedra virado para o centro do tabuleiro.
+    const dx = 3.5 - c, dy = 3.5 - r, m = Math.max(Math.abs(dx), Math.abs(dy));
+    const fx = Math.round(50 + (dx / m) * 48), fy = Math.round(50 + (dy / m) * 48);
+    const v = (i * 3 + Math.floor(i / 4)) % 5;   // forma e rachaduras da pedra: varia sem repetir a vizinha
+    return `<div class="cell v${v}" data-casa="${i}" style="grid-row:${r};grid-column:${c};--t:var(--c-${k});--fx:${fx}%;--fy:${fy}%" title="${E.CASAS[k].nome}"><span class="pedra"></span>${ic(k)}<span class="lbl">${E.CASAS[k].nome}</span><span class="guardiao" hidden></span><span class="farol"></span></div>`;
   }).join('');
   // O cenário fica embaixo das casas: o dia carrega já; noite e chuva só quando forem usados (ou com folga).
   const cenario = `<div class="cenario" aria-hidden="true"><img class="c-dia" src="img/cenario/dia.webp" alt="" decoding="async"><img class="c-noite" data-src="img/cenario/noite.webp" alt="" decoding="async"><img class="c-chuva" data-src="img/cenario/chuva.webp" alt="" decoding="async"></div>`;
+  // Brilho e fagulhas sobre a fogueira pintada no cenário (ela já tem lenha, chamas e o anel de pedras).
+  const fogueira = '<div class="fogueira-centro" aria-hidden="true"><div class="brilho"></div><div class="brilho b2"></div><div class="fagulhas"><i></i><i></i><i></i><i></i><i></i></div></div>';
   return `<div class="board" id="board" aria-label="Tabuleiro">${cenario}${cells}
-    <div class="centro"><div class="nome">Mercado<br>da <span>Trilha</span></div>
+    <div class="centro">${fogueira}<div class="nome">Mercado<br>da <span>Trilha</span></div>
       <div class="dados" id="dados"></div>
       <p class="note" id="nota"></p></div>
     <div id="peoes" class="peoes-camada" aria-hidden="true"></div></div>`;
@@ -1095,11 +1230,27 @@ function atualizarCentro(st) {
 }
 
 function blocoUltimo(st) {
-  if (!st.resposta) return st.ultimo ? `<p>${esc(st.ultimo)}</p>` : '';
+  if (!st.resposta) return '';
   const c = E.cartaMostrada(st, st.resposta.carta);
   const titulo = st.resposta.ok ? `Acertou! +${E.PTS_CARTA} pts.${st.resposta.evitou ? ' Você evitou o revés.' : ''}` : 'Não foi dessa vez.';
   return `<div class="${st.resposta.ok ? 'okmsg brilho' : 'erro'}"><b>${titulo}</b> ${esc(c.porque)}</div>
     ${c.app ? `<p class="app-linha">${esc(c.app)} ${linkHub('carta', 'Conheça')}</p>` : ''}`;
+}
+
+// Uma opção do dado duplo: o dado, quantas casas anda e a casa onde cai.
+function opcaoDado(st, v, i, trava) {
+  const n = E.TABULEIRO.length, pos = (st.pos + v) % n, k = E.TABULEIRO[pos], casa = E.CASAS[k];
+  const extras = [
+    st.pos + v >= n ? `Passa na Partida: +${E.MESADA} BC` : '',
+    casa.loja && E.lojaFechada(st, k) ? 'Loja fechada' : '',
+    casa.loja && E.descontoFeira(st, k) ? 'Feira com desconto' : '',
+  ].filter(Boolean);
+  return `<button class="dado-esc" data-esc="${i}" style="--d:var(--c-${k})" ${trava}>
+    ${dadoHtml(v)}
+    <span class="passos">Andar ${v} ${v === 1 ? 'casa' : 'casas'}</span>
+    <span class="destino">Cai em<b>${ic(k)}${casa.nome}</b></span>
+    ${extras.map((t) => `<small>${t}</small>`).join('')}
+  </button>`;
 }
 
 function painel(st) {
@@ -1113,8 +1264,8 @@ function painel(st) {
     if (st.pend.tipo === 'dado') {
       const [a, b] = st.pend.dados;
       titulo = 'Dado duplo';
-      corpo = `<p>Saiu <b>${a}</b> e <b>${b}</b>. Com qual dado você quer andar?</p>
-        <div class="duplo">${[a, b].map((v, i) => `<button class="btn dado-esc" data-esc="${i}" ${trava}>${dadoHtml(v)}<span>Andar ${v} ${v === 1 ? 'casa' : 'casas'}</span></button>`).join('')}</div>`;
+      corpo = `<p>Com qual dado você quer andar?</p>
+        <div class="duplo">${[a, b].map((v, i) => opcaoDado(st, v, i, trava)).join('')}</div>`;
     } else if (st.pend.tipo === 'loja') {
       titulo = E.CASAS[st.pend.loja].nome;
       const itens = E.ITENS.filter((i) => i.loja === st.pend.loja);
@@ -1164,7 +1315,7 @@ function painel(st) {
         <div class="row"><button class="btn primary" id="pagar" ${st.saldo < st.pend.valor || S.aguardando ? 'disabled' : ''}>Pagar ${bc(st.pend.valor)}</button><button class="btn" id="arriscar" ${trava}>${ic('dado')} Arriscar</button></div>`;
     }
     return `<div class="painel" style="--t:var(--c-${k})"><div class="tag">Rodada ${E.rodadaAtual(st)} de ${st.rodadas}${st.dado ? ` · tirou ${st.dado}` : ''}</div>
-      <div class="ptitulo">${ic(k)}<h3>${titulo}</h3></div>${corpo}</div>`;
+      <div class="ptitulo">${ic(st.pend.tipo === 'dado' ? 'dado' : k)}<h3>${titulo}</h3></div>${corpo}</div>`;
   }
   if (espera && st.rolou) {
     const prontos = S.placar.filter((p) => p.feito || p.fim).length;
@@ -1175,10 +1326,12 @@ function painel(st) {
   return `<div class="painel" style="--t:var(--sun)"><div class="tag">Rodada ${E.rodadaAtual(st)} de ${st.rodadas}${espera ? ' · aberta para todos' : ''}</div>
     ${blocoUltimo(st)}
     ${st.skip ? '<p class="note">Você está parado: esta rodada só passa.</p>' : '<p><b>Como você quer jogar esta rodada?</b></p>'}
-    <div class="escolhas">
-      <button class="btn big primary" id="rolar" ${trava}><span>${ic('dado')}Rolar o dado</span><small>Grátis</small></button>
-      ${st.skip ? '' : `<button class="btn big" id="duplo" ${op.duplo && !S.aguardando ? '' : 'disabled'}>Dado duplo<small>${st.duploGratis > 0 ? 'Grátis, graças à Bússola' : `Custa ${E.DADO_DUPLO_CUSTO} BC`} · rola dois e fica com um</small></button>
-      <button class="btn big" id="ajudar" ${op.ajudar && !S.aguardando ? '' : 'disabled'}>Ajudar no acampamento<small>Não anda · ganha ${E.AJUDA_GANHO} BC</small></button>`}
+    <div class="acoes-polegar">
+      <div class="escolhas">
+        <button class="btn big primary" id="rolar" ${trava}><span>${ic('dado')}Rolar o dado</span><small>Grátis</small></button>
+        ${st.skip ? '' : `<button class="btn big" id="duplo" ${op.duplo && !S.aguardando ? '' : 'disabled'}><span>${ic('dado')}Dado duplo</span><small>${st.duploGratis > 0 ? 'Grátis, graças à Bússola' : `Custa ${E.DADO_DUPLO_CUSTO} BC`} · rola dois e fica com um</small></button>
+        <button class="btn big" id="ajudar" ${op.ajudar && !S.aguardando ? '' : 'disabled'}><span>Ajudar no acampamento</span><small>Não anda · ganha ${E.AJUDA_GANHO} BC</small></button>`}
+      </div>
     </div></div>`;
 }
 
@@ -1188,7 +1341,7 @@ function conta(st, cor) {
   return `<div class="conta" id="conta"><header style="--pc:${cor}"><img src="${fichaSrc(st.ficha)}" alt="${esc(fichaNome(st.ficha))}"><span class="nm">${esc(st.apelido)}<span class="sub">Conta BadenCoin · inspirada no Trilha HUB</span></span><span class="bc muted">${E.pontuacao(st).total} pts</span></header>
     <div class="saldo">${ic('moeda')}<b id="saldoNum">${st.saldo}</b><span>BC</span></div>
     <div class="cbody">
-      <div><div class="eyebrow" style="margin-bottom:6px">Kit de Acampamento · ${st.kit.length}/7</div><div class="kitrow">${E.ITENS.map((i) => `<span class="kit${st.kit.includes(i.id) ? ' on' : ''}" style="--t:var(--c-${i.loja})">${i.nome}</span>`).join('')}</div></div>
+      <div><div class="eyebrow" style="margin-bottom:6px">Kit de Acampamento · ${st.kit.length}/7</div><div class="kit-ilustrado">${E.ITENS.map((i) => `<span class="kit-ico${st.kit.includes(i.id) ? ' on' : ''}" style="--t:var(--c-${i.loja})" title="${esc(i.nome)}" role="img" tabindex="0" aria-label="${esc(i.nome)}: ${st.kit.includes(i.id) ? 'no kit' : 'falta'}">${ITEM_IC[i.id] || ic(i.loja)}<span class="kit-tip" aria-hidden="true">${esc(i.nome)}</span></span>`).join('')}</div></div>
       ${meta ? `<div class="meta-card"><div class="eyebrow">Sua meta secreta</div><div><b>${esc(meta.nome)}</b> <span class="muted">· +${meta.pts} pts no fim</span></div><span class="note">Só você vê. Os outros descobrem no fim da partida.</span></div>` : ''}
       <div><div class="eyebrow" style="margin-bottom:6px">Avisos da conta</div><div class="avisos">${avisos.map((a) => `<div class="aviso ${a.tipo}">${esc(a.texto)}</div>`).join('')}</div></div>
       <details><summary>Extrato (últimas 10)</summary><table class="extrato">${st.extrato.slice().reverse().map((x) => `<tr><td>${esc(x.d)}</td><td class="v">${x.v > 0 ? '+' : ''}${x.v} BC</td><td class="v muted">${x.s} BC</td></tr>`).join('')}</table></details>
@@ -1199,7 +1352,7 @@ function placarHtml() {
   const agora = Date.now();
   return `<div class="placar">${S.placar.map((p, i) => {
     const seta = S.setas[p.ordem], d = S.delta[p.ordem];
-    return `<div class="pl${p.eu ? ' eu' : ''}" style="--pc:${p.cor}"><span class="pos">${i + 1}${seta ? `<span class="seta ${seta}" aria-label="${seta === 'up' ? 'subiu' : 'desceu'}">${seta === 'up' ? '▲' : '▼'}</span>` : ''}</span><img src="${fichaSrc(p.ficha)}" alt="${esc(fichaNome(p.ficha))}"><div><div class="nm">${esc(p.apelido)}${p.eu ? ' (você)' : ''} ${(p.insignias || []).slice(0, 3).map((i) => seloHtml(i)).join('')}</div><div class="meta">${p.patrulha != null ? `${esc(S.sala?.patrulhas?.find((x) => x.n === p.patrulha)?.nome || '')} · ` : ''}Kit ${p.kit}/7 · rodada ${Math.min(p.rodada + (p.fim ? 0 : 1), eu()?.rodadas || 12)}${p.fim ? ' · terminou' : ''}${S.sala?.tipo === 'espera' && p.feito && !p.fim ? ' · pronto' : ''} · ${p.saldo} BC</div></div><span class="pts">${d && d.ate > agora ? `<span class="delta">+${d.v}</span>` : ''}${p.pontos} pts</span></div>`;
+    return `<div class="pl${p.eu ? ' eu' : ''}" style="--pc:${p.cor}" data-ordem-placar="${p.ordem}" role="button" tabindex="0" title="Ver ficha de ${esc(p.apelido)}"><span class="pos">${i + 1}${seta ? `<span class="seta ${seta}" aria-label="${seta === 'up' ? 'subiu' : 'desceu'}">${seta === 'up' ? '▲' : '▼'}</span>` : ''}</span><img src="${fichaSrc(p.ficha)}" alt="${esc(fichaNome(p.ficha))}"><div><div class="nm">${esc(p.apelido)}${p.eu ? ' (você)' : ''} ${(p.insignias || []).slice(0, 3).map((i) => seloHtml(i)).join('')}</div><div class="meta">${p.patrulha != null ? `${esc(S.sala?.patrulhas?.find((x) => x.n === p.patrulha)?.nome || '')} · ` : ''}Kit ${p.kit}/7 · rodada ${Math.min(p.rodada + (p.fim ? 0 : 1), eu()?.rodadas || 12)}${p.fim ? ' · terminou' : ''}${S.sala?.tipo === 'espera' && p.feito && !p.fim ? ' · pronto' : ''} · ${p.saldo} BC</div></div><span class="pts">${d && d.ate > agora ? `<span class="delta">+${d.v}</span>` : ''}${p.pontos} pts</span></div>`;
   }).join('')}</div>`;
 }
 
@@ -1229,7 +1382,7 @@ function muralHtml() {
 function barraTopo(st) {
   const s = S.sala, espera = S.modo === 'sala' && s?.tipo === 'espera';
   const modoChip = S.modo === 'solo' ? '<span class="chip">Sozinho</span>' : espera ? '<span class="chip">Sala de espera</span>' : `<span class="chip">Sala <b>${esc(s?.codigo)}</b></span>`;
-  return topo(`${modoChip}<span class="chip">Rodada <b>${E.rodadaAtual(st)}/${st.rodadas}</b></span><span class="sp"></span>${botaoSom()}<button class="btn sm" id="sair">${S.modo === 'solo' ? 'Pausar' : 'Sair'}</button>${espera && s.status === 'em_jogo' ? '<div class="timer" id="timer"><i></i></div><div class="pend-top" id="pend"></div>' : ''}`);
+  return topo(`${modoChip}<span class="chip">Rodada <b>${E.rodadaAtual(st)}/${st.rodadas}</b></span><span class="sp"></span>${botaoSom()}${botaoMusica()}<button class="btn sm" id="sair">${S.modo === 'solo' ? 'Pausar' : 'Sair'}</button>${espera && s.status === 'em_jogo' ? '<div class="timer" id="timer"><i></i></div><div class="pend-top" id="pend"></div>' : ''}`);
 }
 
 function reacoesHtml() {
@@ -1283,7 +1436,9 @@ function painelOfertas() {
 function missaoHtml() {
   const m = S.sala?.missao || S.missaoSolo;
   if (!m) return '';
-  return `<div class="missao${m.vencedor ? ' feita' : ''}"><span class="eyebrow">Missão da sala</span><span><b>${esc(m.desc)}</b>. O primeiro a cumprir ganha +${m.pts} pts.</span>${m.vencedor ? `<span>Cumprida por <b>${esc(m.vencedor)}</b>.</span>` : '<span class="note">Ninguém cumpriu ainda.</span>'}</div>`;
+  return `<details class="missao-aba${m.vencedor ? ' feita' : ''}"${S.missaoAberta ? ' open' : ''}><summary>${ic('bussola')} Missão da Sala${m.vencedor ? ' · cumprida' : ''}</summary>
+    <div class="missao-corpo"><b>${esc(m.desc)}</b><span class="note">O primeiro a cumprir ganha +${m.pts} pts.</span>
+    ${m.vencedor ? `<span>Cumprida por <b>${esc(m.vencedor)}</b>.</span>` : '<span class="note">Ninguém cumpriu ainda.</span>'}</div></details>`;
 }
 
 function atualizarPainel() {
@@ -1307,6 +1462,7 @@ function atualizarJogo() {
     atualizarPlacar(); $('#patrulhas').innerHTML = patrulhasHtml(); $('#anfitriao').innerHTML = anfitriao(); atualizarMural(); ligarAnfitriao();
   } else atualizarPlacar();
   $('#missao').innerHTML = missaoHtml();
+  $('#missao details')?.addEventListener('toggle', (e) => { S.missaoAberta = e.currentTarget.open; });
   atualizarCasas(st); atualizarCentro(st); atualizarPontes();
   if (nova || !S.cenaEmCurso) sincronizarPeoes(S.placar);
   tique();
@@ -1327,6 +1483,15 @@ function ligarFixos() {
     todos.forEach((x) => { x.disabled = true; });
     setTimeout(() => todos.forEach((x) => { x.disabled = false; }), E.REACAO_INTERVALO_MS);
   }));
+  const abrirFichaDoPlacar = (e) => {
+    const plEl = e.target.closest('[data-ordem-placar]');
+    if (!plEl || (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ')) return;
+    if (e.type === 'keydown') e.preventDefault();
+    const o = Number(plEl.dataset.ordemPlacar);
+    mostrarDetalhesFicha(S.placar.find((x) => x.ordem === o));
+  };
+  app.addEventListener('click', abrirFichaDoPlacar);
+  app.addEventListener('keydown', abrirFichaDoPlacar);
   if (window.ResizeObserver) new ResizeObserver(() => layoutPeoes()).observe($('#board'));
   // Com folga e sem economia de dados, já baixa os outros cenários para a troca não esperar a rede.
   if (!navigator.connection?.saveData) setTimeout(() => document.querySelectorAll('.cenario img').forEach(carregarCenario), 8000);
@@ -1401,7 +1566,7 @@ function telaResultado() {
   const novas = sala ? (st.insignias || []) : (r?.novas || []);
   const titulo = desafio ? 'Desafio do dia' : sala ? `Você ficou em ${pos}º de ${S.placar.length}` : S.novoRecorde ? '<span class="recorde">Novo recorde!</span>' : `Você ficou em ${pos}º de ${S.placar.length}`;
   const top = S.ranking?.top || [];
-  return `${topo(`<span class="sp"></span>${botaoSom()}<button class="btn sm" id="inicio">Voltar ao início</button>`)}
+  return `${topo(`<span class="sp"></span>${botaoSom()}${botaoMusica()}<button class="btn sm" id="inicio">Voltar ao início</button>`)}
   <div class="wrap resultado">
     <div class="eyebrow">Fim do mercado${desafio ? (r.treino ? ' · treino' : ' · primeira tentativa do dia') : ''}</div>
     <h2>${titulo}</h2>
