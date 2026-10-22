@@ -34,9 +34,9 @@ Estado: as etapas 1 a 4 do RFC "Mercado da Trilha mais divertido e interativo" e
 
 Já existem `LICENSE` (MIT, Paulo Afonso Gomes Fernandes Consultoria em Tecnologia da Informação LTDA, CNPJ 68.286.058/0001-87), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `PRIVACY.md`, `SECURITY.md`, `TRADEMARKS.md` e `THIRD_PARTY_LICENSES.md`. Ainda faltam:
 
-- [ ] Ao criar o repositório no GitHub, **ligar o reporte privado de vulnerabilidades** (Settings → Code security → Private vulnerability reporting). O `SECURITY.md`, o Código de Conduta e o `PRIVACY.md` já apontam para o GitHub.
+- [x] Reporte privado de vulnerabilidades do GitHub ligado em 21/10/2026. O `SECURITY.md`, o Código de Conduta e o `PRIVACY.md` apontam para o GitHub.
 - [ ] Decidir a licença das fichas finais. O cenário, gerado por IA, foi para a MIT junto com o código (`docs/arte/cenario.md`, "Direitos de uso").
-- [ ] Publicar o repositório: hoje ele não tem remoto (`git remote -v` vazio). O histórico não tem `.env` nem segredos versionados.
+- [x] Repositório público em https://github.com/pauloagomes/mercado-da-trilha desde 21/10/2026 (`main` e esta branch, PR #1). Antes de publicar, o histórico foi conferido: sem `.env`, segredos, IPs ou e-mails reais.
 - [ ] Traduções: o `CONTRIBUTING.md` aceita traduções, mas os textos da interface estão escritos direto no código, sem um sistema de tradução.
 - [ ] Opcional: modelos de Issue e de Pull Request em `.github/`, com os campos que o `CONTRIBUTING.md` pede.
 
