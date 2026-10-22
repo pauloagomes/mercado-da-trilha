@@ -82,6 +82,8 @@ await ate(() => a.estado?.placar.length === 2 && b.estado?.eu);
 assert.notEqual(a.estado.placar[0].cor, a.estado.placar[1].cor, 'bordas com cores diferentes');
 assert.equal(a.estado.sala.souAnfitriao, true);
 assert.equal(b.estado.sala.souAnfitriao, false);
+// A tela do jogo mostra os itens da missão da sala como ícones.
+assert.ok(Array.isArray(a.estado.sala.missao.itens) && a.estado.sala.missao.itens.length >= 2 && a.estado.sala.missao.itens.every((id) => ITENS.some((i) => i.id === id)), 'a missão traz os itens');
 
 for (let i = 0; i < 200 && !(a.estado.eu.fim && b.estado.eu.fim); i++) {
   jogarVez(a); jogarVez(b);

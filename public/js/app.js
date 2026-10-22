@@ -86,11 +86,15 @@ const S = {
   resultado: null, trilha: null, ranking: null, soloSala: false,
   troca: {}, missaoSolo: null,
   setas: {}, delta: {},  // C5: quem subiu ou desceu no placar e os pontos ganhos na última jogada
+  log: [], logNovo: false, aba: 'placar', metaVista: null, primeiraVez: false, janelaFechada: null,   // tela do jogo
+  ultimoNota: null, kitAnt: null, placarAnt: null, muralVisto: false,
 };
 
 // ---------- Utilidades de tela ----------
 let toastT;
-function toast(msg) {
+function toast(msg, tentativa = 0) {
+  // Com a carta ou a barraca na frente o aviso esperaria por cima do texto: tenta de novo quando ela fechar.
+  if (tentativa < 8 && ($('#cartaPalco') || $('#lojaPalco'))) { setTimeout(() => toast(msg, tentativa + 1), 1500); return; }
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 3800);
 }
@@ -229,7 +233,7 @@ async function iniciar() {
     enviarContador();
     carregarRanking();
     const sala = ls.get('mt-sala', null);
-    if (sala && S.registrado) { S.modo = 'sala'; S.tela = 'jogo'; S.cenasN = null; await conectar(); enviar({ t: 'entrar', codigo: sala }); }
+    if (sala && S.registrado) { S.modo = 'sala'; S.tela = 'jogo'; S.cenasN = null; reiniciarFaixas(); await conectar(); enviar({ t: 'entrar', codigo: sala }); }
   } catch { S.online = false; }
   if (S.temConta && !S.registrado && S.tela === 'entrada') { abrirPerfis(); return; }   // conta sem perfil escolhido aqui
   render();
@@ -298,7 +302,7 @@ function receber(m) {
   if (m.t === 'estado') {
     empilhar(m);
   } else if (m.t === 'partida') {
-    S.modo = 'sala'; ls.set('mt-sala', m.codigo); S.fila = null; S.cenasN = null; S.eu = null; S.peaoPos = {};
+    S.modo = 'sala'; ls.set('mt-sala', m.codigo); S.fila = null; S.cenasN = null; reiniciarFaixas(); S.eu = null; S.peaoPos = {};
     if (S.tela !== 'resultado' || m.nova) { S.tela = 'jogo'; S.verTab = false; S.resultado = null; S.confetou = false; S.setas = {}; S.delta = {}; S.placar = []; }
   } else if (m.t === 'fila') {
     S.fila = m; S.offset = m.agora - Date.now();
@@ -352,10 +356,11 @@ async function aplicar(m, animar) {
     // sem animar, os avisos que mereciam toast ainda aparecem
     for (const c of novas) for (const ev of c.cena) if (ev.t === 'sala' && c.ordem === minhaOrdem(m)) toast(`${ev.de} tirou "${ev.carta}"`);
   }
-  const antes = S.eu;
+  const antes = S.eu, muralAntes = S.mural;
   atualizarRanking(m.placar);
   S.missaoSolo = m.missao || null;
   S.sala = m.sala; S.eu = m.eu; S.placar = m.placar; S.mural = m.mural; S.pontes = m.pontes || {};
+  registrarCenas(novas, m); registrarMural(m.mural, muralAntes);
   if (m.sala) S.offset = m.sala.agora - Date.now();
   if (m.eu && antes && antes.pend?.tipo === 'loja' && !m.eu.pend) S.carrinho = {};
   if (S.modo === 'sala' && (m.sala.status === 'encerrada' || m.eu?.fim) && S.tela === 'jogo' && !S.verTab) S.tela = 'resultado';
@@ -438,7 +443,7 @@ function atualizarLojaGrande() {
   $('#ljBalcao').innerHTML = `${avisos}
     <div class="lj-total"><span>Saldo ${st.saldo} BC</span><b>Total ${total} BC</b></div>
     <div class="lj-botoes"><button class="btn primary" id="ljPagar" ${sel.length && !S.aguardando ? '' : 'disabled'}>Pagar ${total} BC</button>
-      <button class="btn" id="ljSair" ${trava}>Sair sem comprar</button><button class="btn sm lj-painel" id="ljPainel">Ver no painel</button></div>`;
+      <button class="btn" id="ljSair" ${trava}>Sair sem comprar</button></div>`;
   ov.querySelectorAll('[data-lj-item]').forEach((b) => b.addEventListener('click', () => {
     S.carrinho[b.dataset.ljItem] = !S.carrinho[b.dataset.ljItem]; S.erro = '';
     atualizarPainel();
@@ -446,7 +451,6 @@ function atualizarLojaGrande() {
   }));
   $('#ljPagar').addEventListener('click', () => acao('comprar', { itens: Object.keys(S.carrinho).filter((k) => S.carrinho[k]) }));
   $('#ljSair').addEventListener('click', () => acao('sair_loja'));
-  $('#ljPainel').addEventListener('click', () => ov.fechar());
 }
 
 // Comprou ou saiu: as portas fecham e a barraca some.
@@ -590,7 +594,7 @@ function atualizarRanking(novo) {
   }
   if (mexeu) setTimeout(atualizarPlacar, 2700);
 }
-function atualizarPlacar() { const el = $('#placar'); if (el) el.innerHTML = placarHtml(); }
+function atualizarPlacar() { const el = $('#placar'); if (el) el.innerHTML = placarHtml(); else if ($('#jAmigos')) atualizarAmigos(); }
 
 // ---------- Avisos na tela ----------
 function banner(texto, cls = '') {
@@ -638,29 +642,22 @@ async function animarCena(c, m) {
 const celula = (i) => $(`#board [data-casa="${i}"]`);
 const peao = (o) => $(`#peoes [data-o="${o}"]`);
 
-// Dado 3D do centro do tabuleiro: um cubo com as 6 faces. Cada face fica num lado do cubo e,
-// para mostrar o valor v de frente, o cubo gira o contrário (ROT). A rolagem anima só transform.
-const FACE_LADO = { 1: 'rotateY(0deg)', 2: 'rotateY(90deg)', 3: 'rotateX(90deg)', 4: 'rotateX(-90deg)', 5: 'rotateY(-90deg)', 6: 'rotateY(180deg)' };
-const ROT = { 1: [0, 0], 2: [0, -90], 3: [-90, 0], 4: [90, 0], 5: [0, 90], 6: [0, 180] };
-const giro = (v) => `rotateX(${ROT[v][0]}deg) rotateY(${ROT[v][1]}deg)`;
-const dado3dHtml = (v) => `<div class="d3" role="img" aria-label="Dado: ${v}"><div class="d3-pulo"><div class="d3-vista"><div class="d3-cubo" style="transform:${giro(v)}">${[1, 2, 3, 4, 5, 6].map((f) => `<div class="d3-face" style="transform:${FACE_LADO[f]} translateZ(calc(var(--s) / 2))">${[...Array(9)].map((_, k) => `<i class="${PIPS[f].includes(k) ? 'on' : ''}"></i>`).join('')}</div>`).join('')}</div></div></div><i class="d3-sombra"></i></div>`;
-// Joga o dado: duas voltas e pouco no ar, um quique e para na face `v`. Com "reduzir movimento" só mostra a face.
-function rolar3d(el, v, atraso = 0) {
-  const cubo = el.querySelector('.d3-cubo'), pulo = el.querySelector('.d3-pulo'), sombra = el.querySelector('.d3-sombra');
-  const fim = giro(v);
-  cubo.style.transform = fim;
-  if (reduzir) return Promise.resolve();
-  const [x, y] = ROT[v], dur = 720;
-  const ini = `rotateX(${x - 720 - Math.round(Math.random() * 180)}deg) rotateY(${y - 360 - Math.round(Math.random() * 180)}deg)`;
-  const a = cubo.animate([{ transform: ini }, { transform: fim }], { duration: dur, delay: atraso, easing: 'cubic-bezier(.12,.62,.28,1)', fill: 'backwards' });
-  pulo.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-42%)', offset: 0.3 }, { transform: 'translateY(0)', offset: 0.62 },
-    { transform: 'translateY(-10%)', offset: 0.8 }, { transform: 'translateY(0)' }], { duration: dur, delay: atraso, easing: 'ease-out' });
-  sombra.animate([{ transform: 'scale(1)', opacity: 0.5 }, { transform: 'scale(.55)', opacity: 0.2, offset: 0.3 }, { transform: 'scale(1)', opacity: 0.5, offset: 0.62 },
-    { transform: 'scale(.85)', opacity: 0.4, offset: 0.8 }, { transform: 'scale(1)', opacity: 0.5 }], { duration: dur, delay: atraso });
-  return a.finished.catch(() => {});
-}
-
+// O dado que rola no centro do tabuleiro: as faces trocam depressa e param no valor sorteado, depois some.
 const dadoHtml = (v, extra = '') => `<div class="dado${extra}" aria-label="Dado: ${v}">${[...Array(9)].map((_, k) => `<i class="${PIPS[v].includes(k) ? 'on' : ''}"></i>`).join('')}</div>`;
+
+let dadosT = 0;
+async function rolarFaces(vals, rolando = true) {
+  const box = $('#dados'); if (!box) return;
+  clearTimeout(dadosT);
+  box.classList.add('ver');
+  if (rolando) {
+    box.classList.add('rolando'); som('dado', 15);
+    for (let k = 0; k < (reduzir ? 0 : 7); k++) { box.innerHTML = vals.map(() => dadoHtml(1 + Math.floor(Math.random() * 6))).join(''); await sleep(85); }
+  }
+  box.innerHTML = vals.map((v) => dadoHtml(v)).join('');
+  box.classList.remove('rolando');
+  dadosT = setTimeout(() => box.classList.remove('ver'), 1700);
+}
 
 // Posiciona cada peão na casa onde está desenhado; vários na mesma casa dividem o espaço.
 function layoutPeoes() {
@@ -810,24 +807,12 @@ function piscar(sel, cor) {
 const CENAS = {
   async dado(ev, ordem, meu) {
     if (!meu) return;
-    const box = $('#dados'); if (!box) return;
-    const n = ev.v.length;
-    box.innerHTML = ev.v.map((v) => dado3dHtml(v)).join('');
-    box.classList.add('rolando'); som('dado', 15);
-    await Promise.all([...box.querySelectorAll('.d3')].map((el, i) => rolar3d(el, ev.v[i], i * 110)));
-    box.classList.remove('rolando');
-    if (n === 1) { const dest = celula((S.peaoPos[ordem] + ev.v[0]) % E.TABULEIRO.length); dest?.classList.add('destino'); setTimeout(() => dest?.classList.remove('destino'), 900); }
+    await rolarFaces(ev.v);
+    if (ev.v.length === 1) { const dest = celula((S.peaoPos[ordem] + ev.v[0]) % E.TABULEIRO.length); dest?.classList.add('destino'); setTimeout(() => dest?.classList.remove('destino'), 900); }
   },
   async escolheu(ev, ordem, meu) {
     if (!meu) return;
-    const box = $('#dados'); if (!box) return;
-    // o dado que ficou cresce um pouco e o outro some
-    const ds = box.querySelectorAll('.d3');
-    if (ds.length === 2 && !reduzir) {
-      ds[1 - ev.i].animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.6)' }], { duration: 220, fill: 'forwards' });
-      await ds[ev.i].animate([{ transform: 'scale(1)' }, { transform: 'scale(1.15)' }, { transform: 'scale(1)' }], { duration: 260 }).finished.catch(() => {});
-    }
-    box.innerHTML = dado3dHtml(ev.v);
+    await rolarFaces([ev.v], false);
     const dest = celula((S.peaoPos[ordem] + ev.v) % E.TABULEIRO.length);
     dest?.classList.add('destino'); setTimeout(() => dest?.classList.remove('destino'), 900);
     await sleep(160);
@@ -851,6 +836,7 @@ const CENAS = {
   },
   async credito(ev, ordem, meu) {
     if (!meu) return;
+    mostrarNota(`${ev.d}: +${ev.v} BC`);
     som('moeda');
     await moedasAteSaldo(ordem, Math.min(5, Math.max(1, Math.round(ev.v / 10))));
     await contarSaldo(ev.saldo);
@@ -864,7 +850,7 @@ const CENAS = {
   async recusa(ev, ordem, meu) {
     if (!meu) return;
     som('recusa', [60, 40, 60]);
-    $('#conta')?.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }], { duration: 280 });
+    $('#bConta')?.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }], { duration: 280 });
     await sleep(200);
   },
   async fogo(ev, ordem, meu, m) {
@@ -877,10 +863,7 @@ const CENAS = {
   },
   async arriscou(ev, ordem, meu) {
     if (!meu) return;
-    const box = $('#dados'); if (!box) return;
-    box.innerHTML = dado3dHtml(ev.v); box.classList.add('rolando'); som('dado', 15);
-    await rolar3d(box.querySelector('.d3'), ev.v);
-    box.classList.remove('rolando');
+    await rolarFaces([ev.v]);
     await sleep(150);
   },
   async ponte(ev, ordem, meu, m) {
@@ -951,7 +934,7 @@ function mostrarReacao(m) {
   }
   som('reacao');
   S.mural = [...S.mural, { texto: m.texto, cor: m.cor, em: Date.now() }].slice(-15);
-  atualizarMural();
+  anotar(m.texto, m.cor); atualizarFaixas();
 }
 
 // ---------- Insígnias, histórico e envio dos resultados ----------
@@ -1025,7 +1008,7 @@ function publicarSolo(cenas = []) {
   const placar = [...ctx.estados].map(([id, s]) => ({ ...E.resumoPublico(s), cor: corDe(id), ordem: ORDEM[id], eu: id === 'eu', patrulha: null, insignias: [] })).sort(E.compararPlacar);
   const pontes = {};
   for (const [pos, id] of Object.entries(ctx.pontes || {})) pontes[pos] = ORDEM[id];
-  const mi = ctx.missao ? { desc: E.descreverMissao(ctx.missao), pts: E.MISSAO_PTS, vencedor: ctx.missao.vencedor != null ? ctx.estados.get(ctx.missao.vencedor)?.apelido || null : null } : null;
+  const mi = ctx.missao ? { nome: E.missaoPorId(ctx.missao.id).nome, itens: E.missaoPorId(ctx.missao.id).itens, desc: E.descreverMissao(ctx.missao), pts: E.MISSAO_PTS, vencedor: ctx.missao.vencedor != null ? ctx.estados.get(ctx.missao.vencedor)?.apelido || null : null } : null;
   empilhar({ t: 'estado', sala: null, eu: snap, placar, mural: [], pontes, cenas, missao: mi });
 }
 
@@ -1103,7 +1086,7 @@ async function jogarSozinho(continuar, modo = 'solo') {
   }
   salvo.perfil ??= S.perfilId;
   S.solo = salvo; salvarSolo();
-  S.cenasN = null; S.aguardando = false; S.peaoPos = {}; S.resultado = null; S.confetou = false; S.setas = {}; S.delta = {}; S.placar = []; pendentes.length = 0;
+  S.cenasN = null; reiniciarFaixas(); S.aguardando = false; S.peaoPos = {}; S.resultado = null; S.confetou = false; S.setas = {}; S.delta = {}; S.placar = []; pendentes.length = 0;
   S.eu = null;
   publicarSolo();
   ir('jogo');
@@ -1131,12 +1114,12 @@ async function entrarComCodigo(codigo) {
   codigo = String(codigo || '').trim().toUpperCase();
   if (!/^[A-Z0-9]{5}$/.test(codigo)) { toast('O código tem 5 letras ou números.'); return; }
   try { if (!await preparoOnline()) return; } catch (e) { toast(e.message); return; }
-  S.modo = 'sala'; ls.set('mt-sala', codigo); S.cenasN = null; S.peaoPos = {}; S.eu = null;
+  S.modo = 'sala'; ls.set('mt-sala', codigo); S.cenasN = null; reiniciarFaixas(); S.peaoPos = {}; S.eu = null;
   enviar({ t: 'entrar', codigo });
 }
 // E4: o anfitrião reabriu a sala com código; todos os que estavam no resultado são levados juntos.
 function entrarNaRevanche(codigo) {
-  S.modo = 'sala'; ls.set('mt-sala', codigo); S.cenasN = null; S.peaoPos = {}; S.eu = null; S.placar = [];
+  S.modo = 'sala'; ls.set('mt-sala', codigo); S.cenasN = null; reiniciarFaixas(); S.peaoPos = {}; S.eu = null; S.placar = [];
   S.verTab = false; S.resultado = null; S.setas = {}; S.delta = {};
   S.tela = 'jogo'; render();
   enviar({ t: 'entrar', codigo });
@@ -1145,7 +1128,7 @@ async function criarSala() {
   try {
     if (!await preparoOnline()) return;
     const { codigo } = await api('/api/salas', { rodadas: S.rodadas });
-    S.modo = 'sala'; ls.set('mt-sala', codigo); S.cenasN = null; S.peaoPos = {}; S.eu = null;
+    S.modo = 'sala'; ls.set('mt-sala', codigo); S.cenasN = null; reiniciarFaixas(); S.peaoPos = {}; S.eu = null;
     enviar({ t: 'entrar', codigo });
   } catch (e) { toast(e.message); }
 }
@@ -1657,9 +1640,8 @@ function montarTabuleiro() {
   // Brilho e fagulhas sobre a fogueira pintada no cenário (ela já tem lenha, chamas e o anel de pedras).
   const fogueira = '<div class="fogueira-centro" aria-hidden="true"><div class="brilho"></div><div class="brilho b2"></div><div class="fagulhas"><i></i><i></i><i></i><i></i><i></i></div></div>';
   return `<div class="board" id="board" aria-label="Tabuleiro">${cenario}${cells}
-    <div class="centro">${fogueira}<div class="nome">Mercado<br>da <span>Trilha</span></div>
-      <div class="dados" id="dados"></div>
-      <p class="note" id="nota"></p></div>
+    <div class="centro">${fogueira}<p class="j-nota" id="jNota" role="status" aria-live="polite"></p>
+      <div class="dados" id="dados" aria-hidden="true"></div></div>
     <div id="peoes" class="peoes-camada" aria-hidden="true"></div></div>`;
 }
 
@@ -1694,22 +1676,6 @@ function atualizarPontes(placar = S.placar) {
     }
   });
 }
-function atualizarCentro(st) {
-  const box = $('#dados'), nota = $('#nota');
-  if (nota) nota.textContent = st.ultimo || 'Escolha como jogar a rodada.';
-  if (!box || box.classList.contains('rolando')) return;
-  const dados = st.pend?.tipo === 'dado' ? st.pend.dados : st.dado ? [st.dado] : [5];
-  box.innerHTML = dados.map((v) => dado3dHtml(v)).join('');
-}
-
-function blocoUltimo(st) {
-  if (!st.resposta) return '';
-  const c = E.cartaMostrada(st, st.resposta.carta);
-  const titulo = st.resposta.ok ? `Acertou! +${E.PTS_CARTA} pts.${st.resposta.evitou ? ' Você evitou o revés.' : ''}` : 'Não foi dessa vez.';
-  return `<div class="${st.resposta.ok ? 'okmsg brilho' : 'erro'}"><b>${titulo}</b> ${esc(c.porque)}</div>
-    ${c.app ? `<p class="app-linha">${esc(c.app)} ${linkHub('carta', 'Conheça')}</p>` : ''}`;
-}
-
 // Uma opção do dado duplo: o dado, quantas casas anda e a casa onde cai.
 function opcaoDado(st, v, i, trava) {
   const n = E.TABULEIRO.length, pos = (st.pos + v) % n, k = E.TABULEIRO[pos], casa = E.CASAS[k];
@@ -1724,101 +1690,6 @@ function opcaoDado(st, v, i, trava) {
     <span class="destino">Cai em<b>${ic(k)}${casa.nome}</b></span>
     ${extras.map((t) => `<small>${t}</small>`).join('')}
   </button>`;
-}
-
-function painel(st) {
-  const espera = S.modo === 'sala' && S.sala?.tipo === 'espera', trava = S.aguardando ? 'disabled' : '';
-  if (st.fim) {
-    return `<div class="painel" style="--t:var(--sun)"><div class="tag">Fim do mercado</div><h3>Você completou as ${st.rodadas} rodadas</h3><p>${E.pontuacao(st).total} pts.</p><button class="btn primary" id="verRes">Ver resultado</button></div>`;
-  }
-  if (st.pend) {
-    const k = st.pend.tipo === 'loja' ? st.pend.loja : st.pend.tipo === 'carta' ? E.cartaPorId(st.pend.carta).tipo : st.pend.tipo === 'dado' ? 'partida' : st.pend.tipo;  // troca, pedagio e perdido são o nome da casa
-    let corpo = '', titulo = '';
-    if (st.pend.tipo === 'dado') {
-      const [a, b] = st.pend.dados;
-      titulo = 'Dado duplo';
-      corpo = `<p>Com qual dado você quer andar?</p>
-        <div class="duplo">${[a, b].map((v, i) => opcaoDado(st, v, i, trava)).join('')}</div>`;
-    } else if (st.pend.tipo === 'loja') {
-      titulo = E.CASAS[st.pend.loja].nome;
-      const itens = E.ITENS.filter((i) => i.loja === st.pend.loja);
-      const sel = Object.keys(S.carrinho).filter((id) => S.carrinho[id]);
-      const { total } = E.totalCompra(st, sel);
-      const feira = E.descontoFeira(st, st.pend.loja);
-      corpo = `${feira ? `<div class="okmsg">Feira! ${feira} BC de desconto em cada item.</div>` : ''}
-        ${st.desconto ? `<div class="okmsg">Promoção: ${st.desconto} BC de desconto nesta compra.</div>` : ''}
-        ${st.extra ? `<div class="alerta">O lojista está distraído: a compra vai custar ${st.extra} BC a mais. Confira o aviso de gasto.</div>` : ''}
-        <div class="itens">${itens.map((i) => { const tem = st.kit.includes(i.id), pr = E.precoItem(st, i);
-          return `<label class="item${tem ? ' tem' : ''}"><span class="row"><input type="checkbox" data-item="${i.id}" ${tem ? 'disabled checked' : S.carrinho[i.id] ? 'checked' : ''}>${i.nome}${tem ? ' · já no kit' : ''}</span><span>${pr !== i.preco ? `<s>${i.preco}</s> ` : ''}${bc(pr)}</span></label>`; }).join('')}</div>
-        <div class="total"><span>Total · saldo ${bc(st.saldo)}</span><b>${bc(total)}</b></div>
-        ${S.erro ? `<div class="erro">${esc(S.erro)}</div>` : ''}
-        <div class="row"><button class="btn primary" id="pagarLoja" ${sel.length && !S.aguardando ? '' : 'disabled'}>Pagar ${bc(total)}</button><button class="btn" id="sairLoja" ${trava}>Sair sem comprar</button><button class="btn sm" id="verBarraca">Ver a barraca</button></div>`;
-    } else if (st.pend.tipo === 'carta') {
-      const c = E.cartaMostrada(st, st.pend.carta);
-      titulo = E.CASAS[c.tipo].nome;
-      const curta = leituraCurta() && c.curto;
-      corpo = `<div class="carta" style="--t:var(--c-${c.tipo})"><span class="tag">Carta ${E.CASAS[c.tipo].nome}${c.sala ? ' · vale para a sala toda' : ''}</span><strong>${esc(c.titulo)}</strong>${curta ? `<span><b>${esc(c.curto)}</b></span>` : `<span>${esc(c.historia)}</span>`}</div>
-        ${curta ? '' : `<p><b>${esc(c.pergunta)}</b></p>`}
-        ${c.tipo === 'tempestade' ? '<p class="note">Acertar a pergunta evita o revés.</p>' : ''}
-        <div class="opcoes">${c.opcoes.map((o, i) => `<button class="opcao" data-resp="${i}" ${trava}>${esc(o)}</button>`).join('')}</div>`;
-    } else if (st.pend.tipo === 'troca') {
-      titulo = E.CASAS.troca.nome;
-      const faltam = E.ITENS.filter((i) => !st.kit.includes(i.id));
-      const dar = st.kit.includes(S.troca.dar) ? S.troca.dar : st.kit[0], querer = faltam.some((i) => i.id === S.troca.querer) ? S.troca.querer : faltam[0]?.id;
-      S.troca = { dar, querer };
-      const nome = (id) => E.ITENS.find((i) => i.id === id)?.nome;
-      const bau = dar && querer && E.ITENS.find((i) => i.id === querer).preco <= E.ITENS.find((i) => i.id === dar).preco;
-      const sala = S.modo === 'sala';
-      corpo = `<p>Troque um item do seu kit por outro. <b>Nenhum BC muda de conta.</b></p>
-        ${faltam.length ? `<div class="troca-sel"><label class="f">Eu dou<select id="trocaDar">${st.kit.map((id) => `<option value="${id}" ${id === dar ? 'selected' : ''}>${nome(id)}</option>`).join('')}</select></label>
-        <label class="f">Eu quero<select id="trocaQuero">${faltam.map((i) => `<option value="${i.id}" ${i.id === querer ? 'selected' : ''}>${i.nome}</option>`).join('')}</select></label></div>` : '<div class="okmsg">Você já tem todos os itens do kit!</div>'}
-        <div class="row"><button class="btn primary" id="trocarBau" ${bau && !S.aguardando ? '' : 'disabled'}>Trocar no baú</button>${sala ? `<button class="btn" id="oferecer" ${faltam.length && !S.aguardando ? '' : 'disabled'}>Oferecer à sala</button>` : ''}<button class="btn" id="sairTroca" ${trava}>Sair sem trocar</button></div>
-        <p class="note">Baú: na hora, só por um item que custa o mesmo ou menos${faltam.length && !bau ? ' (este custa mais)' : ''}.${sala ? ' Oferta: quem aceitar primeiro troca com você.' : ''}</p>`;
-    } else if (st.pend.tipo === 'pedagio') {
-      titulo = E.CASAS.pedagio.nome;
-      const g = st.pend.guardiaoApelido;
-      corpo = `<p>O pedágio hoje custa <b>${bc(st.pend.valor)}</b> e vai para o caixa do evento.</p>
-        ${S.modo === 'sala' ? `<p class="note">${g ? `Você tirou a ponte de ${esc(g)}, que ganha ${E.GRATIFICACAO} BC por este pedágio. ` : ''}Agora você é o guardião desta ponte e ganha ${E.GRATIFICACAO} BC de quem pagar aqui.</p>` : ''}
-        ${st.saldo < st.pend.valor ? `<div class="alerta">Seu saldo (${st.saldo} BC) não cobre: o pagamento será recusado e você perde a próxima rodada.</div>` : ''}
-        <div class="row"><button class="btn primary" id="pagar" ${trava}>Pagar ${bc(st.pend.valor)}</button></div>`;
-    } else if (st.pend.tipo === 'perdido') {
-      titulo = E.CASAS.perdido.nome;
-      corpo = `<p>Você se perdeu. Pague <b>${bc(st.pend.valor)}</b> e siga em frente, ou arrisque: role o dado.</p>
-        <p class="note">De 4 a 6 você acha a trilha de graça. De 1 a 3 você perde a próxima rodada.</p>
-        <div class="row"><button class="btn primary" id="pagar" ${st.saldo < st.pend.valor || S.aguardando ? 'disabled' : ''}>Pagar ${bc(st.pend.valor)}</button><button class="btn" id="arriscar" ${trava}>${ic('dado')} Arriscar</button></div>`;
-    }
-    return `<div class="painel" style="--t:var(--c-${k})"><div class="tag">Rodada ${E.rodadaAtual(st)} de ${st.rodadas}${st.dado ? ` · tirou ${st.dado}` : ''}</div>
-      <div class="ptitulo">${ic(st.pend.tipo === 'dado' ? 'dado' : k)}<h3>${titulo}</h3></div>${corpo}</div>`;
-  }
-  if (espera && st.rolou) {
-    const prontos = S.placar.filter((p) => p.feito || p.fim).length;
-    return `<div class="painel" style="--t:var(--sun)"><div class="tag">Rodada ${E.rodadaAtual(st)} de ${st.rodadas}</div>${blocoUltimo(st)}
-      <div class="espera-msg"><span class="pulso"></span><span>Aguardando os outros jogadores (${prontos} de ${S.placar.length} prontos).</span></div></div>`;
-  }
-  const op = E.opcoesDaRodada(st);
-  return `<div class="painel" style="--t:var(--sun)"><div class="tag">Rodada ${E.rodadaAtual(st)} de ${st.rodadas}${espera ? ' · aberta para todos' : ''}</div>
-    ${blocoUltimo(st)}
-    ${st.skip ? '<p class="note">Você está parado: esta rodada só passa.</p>' : '<p><b>Como você quer jogar esta rodada?</b></p>'}
-    <div class="acoes-polegar">
-      <div class="escolhas">
-        <button class="btn big primary" id="rolar" ${trava}><span>${ic('dado')}Rolar o dado</span><small>Grátis</small></button>
-        ${st.skip ? '' : `<button class="btn big" id="duplo" ${op.duplo && !S.aguardando ? '' : 'disabled'}><span>${ic('dado')}Dado duplo</span><small>${st.duploGratis > 0 ? 'Grátis, graças à Bússola' : `Custa ${E.DADO_DUPLO_CUSTO} BC`} · rola dois e fica com um</small></button>
-        <button class="btn big" id="ajudar" ${op.ajudar && !S.aguardando ? '' : 'disabled'}><span>Ajudar no acampamento</span><small>Não anda · ganha ${E.AJUDA_GANHO} BC</small></button>`}
-      </div>
-    </div></div>`;
-}
-
-function conta(st, cor) {
-  const avisos = st.avisos.slice().reverse().slice(0, 8);
-  const meta = E.METAS.find((m) => m.id === st.meta);
-  return `<div class="conta" id="conta"><header style="--pc:${cor}"><img src="${fichaSrc(st.ficha)}" alt="${esc(fichaNome(st.ficha))}"><span class="nm">${esc(st.apelido)}<span class="sub">Conta BadenCoin · inspirada no Trilha HUB</span></span><span class="bc muted">${E.pontuacao(st).total} pts</span></header>
-    <div class="saldo">${ic('moeda')}<b id="saldoNum">${st.saldo}</b><span>BC</span></div>
-    <div class="cbody">
-      <div><div class="eyebrow" style="margin-bottom:6px">Kit de Acampamento · ${st.kit.length}/7</div><div class="kit-ilustrado">${E.ITENS.map((i) => `<span class="kit-ico${st.kit.includes(i.id) ? ' on' : ''}" style="--t:var(--c-${i.loja})" title="${esc(i.nome)}" role="img" tabindex="0" aria-label="${esc(i.nome)}: ${st.kit.includes(i.id) ? 'no kit' : 'falta'}">${ITEM_IC[i.id] || ic(i.loja)}<span class="kit-tip" aria-hidden="true">${esc(i.nome)}</span></span>`).join('')}</div></div>
-      ${meta ? `<div class="meta-card"><div class="eyebrow">Sua meta secreta</div><div><b>${esc(meta.nome)}</b> <span class="muted">· +${meta.pts} pts no fim</span></div><span class="note">Só você vê. Os outros descobrem no fim da partida.</span></div>` : ''}
-      <div><div class="eyebrow" style="margin-bottom:6px">Avisos da conta</div><div class="avisos">${avisos.map((a) => `<div class="aviso ${a.tipo}">${esc(a.texto)}</div>`).join('')}</div></div>
-      <details><summary>Extrato (últimas 10)</summary><table class="extrato">${st.extrato.slice().reverse().map((x) => `<tr><td>${esc(x.d)}</td><td class="v">${x.v > 0 ? '+' : ''}${x.v} BC</td><td class="v muted">${x.s} BC</td></tr>`).join('')}</table></details>
-    </div></div>`;
 }
 
 function placarHtml() {
@@ -1848,32 +1719,8 @@ function anfitriao() {
     <div class="promo"><b>Leve o Trilha HUB para o seu grupo</b><span class="note">A carteira de evento de verdade: recarga por Pix, pagamento por QR ou pulseira e avisos de gasto no WhatsApp dos responsáveis.</span>${linkHub('anfitriao', 'Ver como funciona')}</div></div>`;
 }
 
-function muralHtml() {
-  return S.mural.slice().reverse().map((m) => `<li><span class="dot" style="--pc:${m.cor}"></span><span>${esc(m.texto)}</span></li>`).join('') || '<li>Nada ainda.</li>';
-}
-
-function barraTopo(st) {
-  const s = S.sala, espera = S.modo === 'sala' && s?.tipo === 'espera';
-  const modoChip = S.modo === 'solo' ? '<span class="chip">Sozinho</span>' : espera ? '<span class="chip">Sala de espera</span>' : `<span class="chip">Sala <b>${esc(s?.codigo)}</b></span>`;
-  return topo(`${modoChip}<span class="chip">Rodada <b>${E.rodadaAtual(st)}/${st.rodadas}</b></span><span class="sp"></span>${botaoSom()}${botaoMusica()}<button class="btn sm" id="sair">${S.modo === 'solo' ? 'Pausar' : 'Sair'}</button>${espera && s.status === 'em_jogo' ? '<div class="timer" id="timer"><i></i></div><div class="pend-top" id="pend"></div>' : ''}`);
-}
-
 function reacoesHtml() {
   return `<div class="reacoes" id="reacoes" role="group" aria-label="Reações rápidas">${E.REACOES.map((r, i) => `<button class="btn sm" data-reacao="${i}">${r}</button>`).join('')}</div>`;
-}
-
-function montarJogo() {
-  const sala = S.modo === 'sala', contraRivais = S.modo === 'solo' && S.solo?.modo === 'solo';
-  return `<div id="topo-jogo"></div>
-  <div class="wrap jogo">
-    <div class="j-main">
-      <div class="boardbox">${montarTabuleiro()}<div id="missao"></div>${sala ? reacoesHtml() : ''}</div>
-      <div class="side"><div id="painel"></div><div id="conta-box"></div></div>
-    </div>
-    ${sala ? `<div class="dois"><div class="stack"><div class="eyebrow">Placar da sala</div><div id="placar"></div><div id="patrulhas"></div><div id="anfitriao"></div></div>
-      <div class="stack"><div class="eyebrow">Mural</div><ul class="mural" id="mural"></ul></div></div>` : ''}
-    ${contraRivais ? '<div class="stack"><div class="eyebrow">Placar contra os rivais</div><div id="placar"></div></div>' : ''}
-  </div>`;
 }
 
 // A5 e C3: votação do próximo evento e leilão do Canivete, abertos por 10 s.
@@ -1906,39 +1753,419 @@ function painelOfertas() {
   const nome = (id) => E.ITENS.find((i) => i.id === id)?.nome;
   return `<div class="painel" style="--t:var(--c-troca)"><div class="tag">Feira de Trocas · ofertas</div><div class="ofertas">${of.map((o) => `<div class="oferta"><span><b>${esc(o.apelido)}</b> dá ${nome(o.dar)} e quer ${nome(o.querer)}</span>${o.possoAceitar ? `<button class="btn sm primary" data-aceitar="${o.de}">Aceitar</button>` : `<span class="note">Você precisa ter ${nome(o.querer)} e não ter ${nome(o.dar)}.</span>`}</div>`).join('')}</div></div>`;
 }
-function missaoHtml() {
-  const m = S.sala?.missao || S.missaoSolo;
-  if (!m) return '';
-  return `<details class="missao-aba${m.vencedor ? ' feita' : ''}"${S.missaoAberta ? ' open' : ''}><summary>${ic('bussola')} Missão da Sala${m.vencedor ? ' · cumprida' : ''}</summary>
-    <div class="missao-corpo"><b>${esc(m.desc)}</b><span class="note">O primeiro a cumprir ganha +${m.pts} pts.</span>
-    ${m.vencedor ? `<span>Cumprida por <b>${esc(m.vencedor)}</b>.</span>` : '<span class="note">Ninguém cumpriu ainda.</span>'}</div></details>`;
+// ---------- Tela do jogo: uma tela só, sem rolagem ----------
+// Topo com a ficha, o placar (saldo e pontos), a meta secreta e os amigos; o tabuleiro no maior tamanho possível;
+// os ícones de jogada e o kit no rodapé. O espaço que sobra vira informação, por prioridade: acontecimentos,
+// reações (só nas salas) e missão da sala. Em tela curta nada disso aparece.
+
+// O balão do centro do tabuleiro: o resultado da última jogada. Avisos fixos (parado, esperando) ficam até mudar.
+const NOTA = { t: 0 };
+function mostrarNota(txt, fixo = false) {
+  const el = $('#jNota'); if (!el) return;
+  clearTimeout(NOTA.t);
+  if (!txt) { el.classList.remove('ver'); return; }
+  el.textContent = txt; el.classList.add('ver');
+  if (!fixo) NOTA.t = setTimeout(() => el.classList.remove('ver'), 4200);
+}
+
+// Acontecimentos: o que o jogo avisa e o que os outros jogadores fazem, do mais novo para o mais antigo.
+function reiniciarFaixas() { S.log = []; S.ultimoNota = null; S.kitAnt = null; S.placarAnt = null; S.muralVisto = false; }
+function anotar(texto, cor, tipo = '') {
+  if (S.log.slice(0, 4).some((l) => l.texto === texto)) return;   // a mesma notícia pode vir de várias cenas
+  S.log.unshift({ texto, cor, tipo, rodada: S.eu ? E.rodadaAtual(S.eu) : 1 });
+  if (S.log.length > 40) S.log.length = 40;
+  S.logNovo = true;
+}
+// Cada cena (gasto, crédito, fogo...) vira uma linha. Na sala, o servidor já conta fogo, kit, ponte, missão, troca e
+// carta de sala no mural; no jogo sozinho essas linhas saem das cenas dos rivais.
+function registrarCenas(novas, m) {
+  const minha = minhaOrdem(m), solo = S.modo === 'solo';
+  for (const c of novas) {
+    const p = m.placar.find((x) => x.ordem === c.ordem); if (!p) continue;
+    const meu = c.ordem === minha, quem = meu ? 'Você' : p.apelido;
+    for (const ev of c.cena) {
+      if (ev.t === 'gasto' && meu) anotar(`Você: ${ev.d}, -${ev.v} BC`, p.cor);
+      else if (ev.t === 'credito' && meu) anotar(`Você: ${ev.d}, +${ev.v} BC`, p.cor);
+      else if (ev.t === 'andou' && !meu && ev.passos > 0) anotar(`${quem} andou ${ev.passos} ${ev.passos === 1 ? 'casa' : 'casas'}`, p.cor);
+      else if (ev.t === 'recusa') anotar(`${quem}: pagamento recusado (${ev.d})`, p.cor, 'aviso');
+      else if (ev.t === 'anuncio' && meu) anotar(`Na próxima rodada: ${E.descreverEvento(ev)}`, null, 'aviso');
+      else if (ev.t === 'evento' && meu) anotar(`Evento da rodada: ${E.descreverEvento(ev)}`, null, 'aviso');
+      else if (ev.t === 'noite' && meu) anotar('Noite no acampamento: créditos e cartas certas valem em dobro', null, 'aviso');
+      else if (solo) {
+        if (ev.t === 'fogo') anotar(`${quem} chegou ao Fogo de Conselho`, p.cor);
+        else if (ev.t === 'kit') anotar(`${quem} completou o kit`, p.cor, 'aviso');
+        else if (ev.t === 'ponte') anotar(`${quem} assumiu a ponte`, p.cor);
+        else if (ev.t === 'missao') anotar(`${quem} cumpriu a missão: ${ev.nome}`, p.cor, 'aviso');
+        else if (ev.t === 'troca') anotar(`${quem} fez uma troca na Feira`, p.cor);
+        else if (ev.t === 'sala') anotar(`${ev.de} tirou a carta de sala "${ev.carta}"`, p.cor);
+      }
+    }
+  }
+}
+// Mural da sala: as linhas novas entram nos acontecimentos (as reações que já entraram na hora não repetem).
+function registrarMural(novo, antes) {
+  if (!S.muralVisto) { S.muralVisto = true; return; }   // o mural que já existia ao entrar não vira notícia
+  const tinha = new Set((antes || []).map((x) => `${x.texto}|${x.cor}`));
+  for (const x of novo || []) {
+    if (tinha.has(`${x.texto}|${x.cor}`)) continue;
+    anotar(x.texto, x.cor, /^O anfitrião|Evento da rodada|Votação|Leilão|Canivete/.test(x.texto) ? 'aviso' : '');
+  }
+}
+
+const metaChave = (st) => `${S.modo}:${st.seed}:${st.meta}`;
+
+// ----- Topo -----
+function atualizarTopo(st) {
+  const cor = S.modo === 'sala' ? (S.eu?.cor || COR_SOLO) : COR_SOLO;
+  const pts = E.pontuacao(st).total;
+  $('#jJogador').innerHTML = `<img class="j-avatar" src="${fichaSrc(st.ficha)}" alt="${esc(fichaNome(st.ficha))}" style="--pc:${cor}">
+    <button class="j-placar" id="bConta" type="button" aria-label="Sua conta: saldo ${st.saldo} BC, ${pts} pontos. Toque para ver o extrato">
+      <span class="jp-cab"><span class="jp-nome">${esc(st.apelido)}</span><span>Rodada ${E.rodadaAtual(st)}/${st.rodadas}</span></span>
+      <span class="jp-vals"><span class="jp-val">${ic('moeda')}<b id="saldoNum">${st.saldo}</b><small>BC</small></span><i class="jp-div"></i><span class="jp-val"><b id="pontosNum">${pts}</b><small>pts</small></span></span>
+    </button>`;
+  const ant = S.placarAnt;
+  if (ant && !reduzir) {
+    if (pts !== ant.pontos) piscarValor('#pontosNum', pts > ant.pontos);
+    if (st.saldo !== ant.saldo && !S.cenaEmCurso) piscarValor('#saldoNum', st.saldo > ant.saldo);
+  }
+  S.placarAnt = { saldo: st.saldo, pontos: pts };
+  // meta secreta: pisca até o jogador abrir a carta
+  const meta = $('#bMeta'), vista = S.metaVista === metaChave(st);
+  meta.classList.toggle('pisca', !vista); meta.hidden = !st.meta;
+  atualizarAmigos();
+  const t = $('#timer'), s = S.sala;
+  if (t) t.hidden = !(S.modo === 'sala' && s?.tipo === 'espera' && s.status === 'em_jogo');
+}
+function piscarValor(sel, sobe) {
+  const el = $(sel); if (!el) return;
+  el.classList.remove('sobe', 'desce'); void el.offsetWidth; el.classList.add(sobe ? 'sobe' : 'desce');
+}
+
+// ----- Amigos: um grupo de fichas que abre o placar e os acontecimentos -----
+function amigosListaHtml() {
+  return S.placar.map((p, i) => `<div class="j-amigo${p.eu ? ' eu' : ''}" style="--c:${p.cor}" data-ordem-placar="${p.ordem}" role="button" tabindex="0" title="Ver ficha de ${esc(p.apelido)}"><span class="pos">${i + 1}</span><img src="${fichaSrc(p.ficha)}" alt=""><span><b>${esc(p.apelido)}${p.eu ? ' (você)' : ''}</b><small>${p.patrulha != null ? `${esc(S.sala?.patrulhas?.find((x) => x.n === p.patrulha)?.nome || '')} · ` : ''}Saldo ${p.saldo} BC · Kit ${p.kit}/7${p.fim ? ' · terminou' : ''}</small></span><span class="pts">${p.pontos} pts</span></div>`).join('');
+}
+function logListaHtml() {
+  return S.log.slice(0, 10).map((l) => `<div class="j-log-item ${l.tipo}" style="--c:${l.cor || 'var(--muted)'}"><span class="rod">R${l.rodada}</span><i></i><span>${esc(l.texto)}</span></div>`).join('') || '<p class="note">Ainda não aconteceu nada.</p>';
+}
+function atualizarAmigos() {
+  const outros = S.placar.filter((p) => !p.eu), bt = $('#bAmigos'), painel = $('#jAmigos');
+  bt.hidden = outros.length === 0;
+  if (!outros.length) { painel.hidden = true; return; }
+  $('#jPilha').innerHTML = outros.slice(0, 4).map((p) => `<img src="${fichaSrc(p.ficha)}" alt="${esc(p.apelido)}" title="${esc(p.apelido)}">`).join('');
+  const s = S.sala, cab = s ? `<p class="j-sala-cab">${s.tipo === 'espera' ? 'Sala de espera' : `Sala <b>${esc(s.codigo)}</b>`}</p>` : '';
+  painel.innerHTML = `${cab}<div class="j-abas" role="tablist"><button type="button" role="tab" data-aba="placar" aria-selected="${S.aba === 'placar'}">Amigos</button><button type="button" role="tab" data-aba="log" aria-selected="${S.aba === 'log'}">Acontecimentos</button></div>${S.aba === 'placar' ? `${amigosListaHtml()}${S.sala?.patrulhas ? patrulhasHtml() : ''}` : logListaHtml()}`;
+}
+function alternarAmigos(abrir) {
+  const painel = $('#jAmigos'), bt = $('#bAmigos'); if (!painel) return;
+  const ver = abrir ?? painel.hidden;
+  painel.hidden = !ver; bt.setAttribute('aria-expanded', String(ver));
+}
+
+// ----- Faixas que aproveitam o espaço livre -----
+function atualizarFaixas() {
+  const ac = $('#jAcontece');
+  if (ac) {
+    ac.innerHTML = `<h2>Acontecimentos</h2><ol>${S.log.slice(0, 8).map((l, i) => `<li class="${l.tipo}${i === 0 && S.logNovo ? ' novo' : ''}" style="--c:${l.cor || 'var(--muted)'}"><span>${esc(l.texto)}</span></li>`).join('') || '<li><span>A partida começou. Boa sorte!</span></li>'}</ol>`;
+    S.logNovo = false;
+  }
+  const mi = $('#jMissao'), m = S.sala?.missao || S.missaoSolo, st = eu();
+  if (mi) {
+    if (!m || !m.itens) { mi.innerHTML = ''; mi.dataset.vazio = '1'; }
+    else {
+      delete mi.dataset.vazio;
+      mi.className = `j-missao${m.vencedor ? ' feita' : ''}`;
+      mi.innerHTML = `<span class="rot">Missão</span><span class="nome">${esc(m.nome)}</span><span class="itens">${m.itens.map((id) => { const it = E.ITENS.find((x) => x.id === id);
+        return `<span class="it${st?.kit.includes(id) ? ' tem' : ''}" style="--t:var(--c-${it.loja})" title="${esc(it.nome)}" role="img" aria-label="${esc(it.nome)}: ${st?.kit.includes(id) ? 'no kit' : 'falta'}">${ITEM_IC[id]}</span>`; }).join('')}</span><span class="pts">${m.vencedor ? `${esc(m.vencedor)} ✓` : `+${m.pts} pts`}</span>`;
+    }
+  }
+  if ($('#jAmigos') && !$('#jAmigos').hidden) atualizarAmigos();
+}
+
+// ----- Kit no rodapé -----
+function atualizarKit(st) {
+  const novo = S.kitAnt ? st.kit.find((id) => !S.kitAnt.includes(id)) : null;
+  $('#jKit').innerHTML = `<div class="kit-rot"><span>Kit</span><b>${st.kit.length}/7</b></div><div class="j-slots">${E.ITENS.map((i) =>
+    `<div class="j-slot${st.kit.includes(i.id) ? ' tem' : ''}${novo === i.id ? ' novo' : ''}" style="--t:var(--c-${i.loja})" title="${esc(i.nome)}" role="img" aria-label="${esc(i.nome)}: ${st.kit.includes(i.id) ? 'no kit' : 'falta'}">${ITEM_IC[i.id]}</div>`).join('')}</div>`;
+  S.kitAnt = [...st.kit];
+}
+
+// ----- Ícones de jogada -----
+function acoesHtml(st) {
+  const s = S.sala, espera = S.modo === 'sala' && s?.tipo === 'espera', trava = S.aguardando ? 'disabled' : '';
+  const reabrir = (k, rot, nome) => `<button class="j-acao um" id="reabrir" type="button" aria-label="${esc(nome)}">${ic(k)}<span class="j-valor mais">${rot}</span></button>`;
+  if (st.fim) return `<button class="j-acao um" id="verRes" type="button" aria-label="Ver o resultado">${ic('estrela')}<span class="j-valor mais">Resultado</span></button>`;
+  if (st.pend) {
+    const t = st.pend.tipo;
+    if (t === 'loja') return reabrir(st.pend.loja, 'Abrir', `Abrir ${E.CASAS[st.pend.loja].nome}`);
+    if (t === 'carta') return reabrir(E.cartaPorId(st.pend.carta).tipo, 'Abrir', 'Abrir a carta');
+    return reabrir(t === 'dado' ? 'dado' : t, 'Decidir', 'Decidir agora');
+  }
+  if (painelJanela().exclusivo) return `<button class="j-acao um" type="button" disabled aria-label="Votação aberta">${ic('dado')}<span class="j-valor">Votando</span></button>`;
+  const op = E.opcoesDaRodada(st);
+  const esperando = espera && st.rolou;
+  if (st.skip && !esperando) return `<button class="j-acao um destaque" id="rolar" type="button" ${trava} aria-label="Passar a vez: você está parado nesta rodada">${ic('dado')}<span class="j-valor mais">Passar</span></button>`;
+  return `<button class="j-acao um${S.primeiraVez ? ' destaque' : ''}" id="rolar" type="button" ${trava || (esperando ? 'disabled' : '')} aria-label="Rolar um dado. Grátis">${ic('d1')}<span class="j-valor mais">Grátis</span></button>
+    <button class="j-acao" id="duplo" type="button" ${op.duplo && !S.aguardando ? '' : 'disabled'} aria-label="Dado duplo. ${st.duploGratis > 0 ? 'Grátis, graças à Bússola' : `Custa ${E.DADO_DUPLO_CUSTO} BC`}">${ic('d2')}<span class="j-valor${st.duploGratis > 0 ? ' mais' : ''}">${st.duploGratis > 0 ? 'Grátis' : `${E.DADO_DUPLO_CUSTO} BC`}</span></button>
+    <button class="j-acao ajuda" id="ajudar" type="button" ${op.ajudar && !S.aguardando ? '' : 'disabled'} aria-label="Ajudar no acampamento. Não anda e ganha ${E.AJUDA_GANHO} BC">${ic('ajuda')}<span class="j-valor mais">+${E.AJUDA_GANHO} BC</span></button>`;
+}
+function atualizarAcoes(st) { $('#jBtns').innerHTML = acoesHtml(st); }
+
+// O aviso do centro do tabuleiro: parado, esperando os outros, ou o resultado da última jogada.
+function atualizarNota(st) {
+  const espera = S.modo === 'sala' && S.sala?.tipo === 'espera';
+  if (st.skip && !st.rolou && !st.fim) { mostrarNota('Você está parado: esta rodada só passa.', true); S.ultimoNota = null; return; }
+  if (espera && st.rolou && !st.pend && !st.fim) {
+    const prontos = S.placar.filter((p) => p.feito || p.fim).length;
+    mostrarNota(`Aguardando os outros jogadores (${prontos} de ${S.placar.length} prontos)`, true); S.ultimoNota = null; return;
+  }
+  if (st.ultimo && st.ultimo !== S.ultimoNota) { S.ultimoNota = st.ultimo; mostrarNota(st.ultimo); }
+  else if (!st.ultimo || (S.ultimoNota == null)) mostrarNota('');
+}
+
+// ----- Decisões que pedem uma janela: dado duplo, troca, pedágio e perdido (loja e carta têm as suas) -----
+const DECISOES = ['dado', 'troca', 'pedagio', 'perdido'];
+function decisaoHtml(st) {
+  const trava = S.aguardando ? 'disabled' : '';
+  const k = st.pend.tipo === 'dado' ? 'partida' : st.pend.tipo;   // troca, pedágio e perdido são o nome da casa
+  let corpo = '', titulo = '';
+  if (st.pend.tipo === 'dado') {
+    const [a, b] = st.pend.dados;
+    titulo = 'Dado duplo';
+    corpo = `<p>Com qual dado você quer andar?</p><div class="duplo">${[a, b].map((v, i) => opcaoDado(st, v, i, trava)).join('')}</div>`;
+  } else if (st.pend.tipo === 'troca') {
+    titulo = E.CASAS.troca.nome;
+    const faltam = E.ITENS.filter((i) => !st.kit.includes(i.id));
+    const dar = st.kit.includes(S.troca.dar) ? S.troca.dar : st.kit[0], querer = faltam.some((i) => i.id === S.troca.querer) ? S.troca.querer : faltam[0]?.id;
+    S.troca = { dar, querer };
+    const nome = (id) => E.ITENS.find((i) => i.id === id)?.nome;
+    const bau = dar && querer && E.ITENS.find((i) => i.id === querer).preco <= E.ITENS.find((i) => i.id === dar).preco;
+    const sala = S.modo === 'sala';
+    corpo = `<p>Troque um item do seu kit por outro. <b>Nenhum BC muda de conta.</b></p>
+      ${faltam.length ? `<div class="troca-sel"><label class="f">Eu dou<select id="trocaDar">${st.kit.map((id) => `<option value="${id}" ${id === dar ? 'selected' : ''}>${nome(id)}</option>`).join('')}</select></label>
+      <label class="f">Eu quero<select id="trocaQuero">${faltam.map((i) => `<option value="${i.id}" ${i.id === querer ? 'selected' : ''}>${i.nome}</option>`).join('')}</select></label></div>` : '<div class="okmsg">Você já tem todos os itens do kit!</div>'}
+      <div class="row"><button class="btn primary" id="trocarBau" ${bau && !S.aguardando ? '' : 'disabled'}>Trocar no baú</button>${sala ? `<button class="btn" id="oferecer" ${faltam.length && !S.aguardando ? '' : 'disabled'}>Oferecer à sala</button>` : ''}<button class="btn" id="sairTroca" ${trava}>Sair sem trocar</button></div>
+      <p class="note">Baú: na hora, só por um item que custa o mesmo ou menos${faltam.length && !bau ? ' (este custa mais)' : ''}.${sala ? ' Oferta: quem aceitar primeiro troca com você.' : ''}</p>`;
+  } else if (st.pend.tipo === 'pedagio') {
+    titulo = E.CASAS.pedagio.nome;
+    const g = st.pend.guardiaoApelido;
+    corpo = `<p>O pedágio hoje custa <b>${bc(st.pend.valor)}</b> e vai para o caixa do evento.</p>
+      ${S.modo === 'sala' ? `<p class="note">${g ? `Você tirou a ponte de ${esc(g)}, que ganha ${E.GRATIFICACAO} BC por este pedágio. ` : ''}Agora você é o guardião desta ponte e ganha ${E.GRATIFICACAO} BC de quem pagar aqui.</p>` : ''}
+      ${st.saldo < st.pend.valor ? `<div class="alerta">Seu saldo (${st.saldo} BC) não cobre: o pagamento será recusado e você perde a próxima rodada.</div>` : ''}
+      <div class="row"><button class="btn primary" id="pagar" ${trava}>Pagar ${bc(st.pend.valor)}</button></div>`;
+  } else if (st.pend.tipo === 'perdido') {
+    titulo = E.CASAS.perdido.nome;
+    corpo = `<p>Você se perdeu. Pague <b>${bc(st.pend.valor)}</b> e siga em frente, ou arrisque: role o dado.</p>
+      <p class="note">De 4 a 6 você acha a trilha de graça. De 1 a 3 você perde a próxima rodada.</p>
+      <div class="row"><button class="btn primary" id="pagar" ${st.saldo < st.pend.valor || S.aguardando ? 'disabled' : ''}>Pagar ${bc(st.pend.valor)}</button><button class="btn" id="arriscar" ${trava}>${ic('dado')} Arriscar</button></div>`;
+  }
+  return `<div class="painel" style="--t:var(--c-${k})"><div class="tag">Rodada ${E.rodadaAtual(st)} de ${st.rodadas}${st.dado ? ` · tirou ${st.dado}` : ''}</div>
+    <div class="ptitulo">${ic(st.pend.tipo === 'dado' ? 'dado' : k)}<h3>${titulo}</h3></div>${corpo}</div>`;
+}
+function atualizarDecisao(st) {
+  let ov = $('#jDecisao');
+  if (!st.pend || !DECISOES.includes(st.pend.tipo) || st.fim) { ov?.remove(); return; }
+  const novo = !ov;
+  if (novo) {
+    ov = document.createElement('div'); ov.id = 'jDecisao'; ov.className = 'j-modal'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true');
+    document.body.appendChild(ov);
+  }
+  ov.setAttribute('aria-label', st.pend.tipo === 'dado' ? 'Dado duplo' : E.CASAS[st.pend.tipo].nome);
+  ov.innerHTML = `<div class="j-folha-decisao">${decisaoHtml(st)}</div>`;
+  if (novo) ov.querySelector('button:not(:disabled)')?.focus();
+}
+
+// ----- Votação, leilão e ofertas de troca: uma janela que abre sozinha e pode ser fechada -----
+function atualizarJanela(st) {
+  let ov = $('#jJanela');
+  const s = S.sala, html = st && !st.fim && s ? painelJanela().html + painelOfertas() : '';
+  if (!html) { ov?.remove(); S.janelaFechada = null; return; }
+  const corpo = `<div class="j-folha-decisao">${html}<div class="row" style="margin-top:10px"><button class="btn sm" id="jFecharJanela" type="button">Fechar</button></div></div>`;
+  if (ov) { ov.innerHTML = corpo; return; }
+  const assin = `${s.voto?.fimEm}|${s.leilao?.fimEm}|${(s.ofertas || []).map((o) => `${o.de}${o.dar}${o.querer}`).join(',')}`;
+  if (assin === S.janelaFechada) return;                                              // o jogador já fechou esta
+  if ($('#cartaPalco') || $('#lojaPalco') || $('#jDecisao') || $('#jFolha')) return;   // espera as outras janelas
+  ov = document.createElement('div'); ov.id = 'jJanela'; ov.className = 'j-modal'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Votação, leilão ou ofertas da sala');
+  ov.innerHTML = corpo; ov.dataset.assin = assin; document.body.appendChild(ov);
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#jFecharJanela')) { const ov = $('#jJanela'); S.janelaFechada = ov?.dataset.assin || null; ov?.remove(); }
+});
+
+// ----- Folhas: conta, meta, como jogar, ajustes, sala e sair -----
+function jFechar() { const f = $('#jFolha'); if (!f) return; f.remove(); document.removeEventListener('keydown', jTecla); f.depois?.(); const st = eu(); if (st && S.tela === 'jogo') atualizarJanela(st); }
+function jTecla(e) { if (e.key === 'Escape') jFechar(); }
+function jAbrir(html, { tipo = '', fecha = true, depois } = {}) {
+  $('#jFolha')?.remove();
+  const f = document.createElement('div');
+  f.id = 'jFolha'; f.className = 'j-modal'; f.dataset.tipo = tipo; f.dataset.fecha = fecha ? '1' : ''; f.depois = depois;
+  f.setAttribute('role', 'dialog'); f.setAttribute('aria-modal', 'true');
+  f.innerHTML = html; document.body.appendChild(f);
+  f.addEventListener('click', (e) => { if (e.target === f && f.dataset.fecha) jFechar(); });
+  document.removeEventListener('keydown', jTecla); if (fecha) document.addEventListener('keydown', jTecla);
+  (f.querySelector('[autofocus]') || f.querySelector('button'))?.focus();
+  return f;
+}
+
+function abrirComoJogar(primeira = false) {
+  const f = jAbrir(`<div class="j-folha" aria-label="Sua primeira jogada">
+    <h2>${primeira ? 'Sua primeira jogada' : 'Como jogar a sua vez'}</h2>
+    <p class="sub">Na sua vez, toque em um dos três ícones embaixo do tabuleiro:</p>
+    <ul class="j-explica">
+      <li><span class="chip um">${ic('d1')}</span><span><b>Rolar um dado <em>Grátis</em></b><span>Você anda de 1 a 6 casas e cumpre o que a casa pedir.</span></span></li>
+      <li><span class="chip">${ic('d2')}</span><span><b>Dado duplo <em>${E.DADO_DUPLO_CUSTO} BC</em></b><span>Rola dois dados e você escolhe com qual andar. Dá para ver onde cada um leva.</span></span></li>
+      <li><span class="chip ajuda">${ic('ajuda')}</span><span><b>Ajudar no acampamento <em>+${E.AJUDA_GANHO} BC</em></b><span>Você não anda e ganha ${E.AJUDA_GANHO} BC.</span></span></li>
+    </ul>
+    <div class="j-dica">${ic('util')}<span>O <b>kit do acampamento</b> fica embaixo. Cada item comprado nas lojas acende e vale 10 pontos.</span></div>
+    <div class="j-dica">${ic('estrela')}<span>A <b>estrela piscando</b> é a sua meta secreta${S.placar.length > 1 ? ', e o grupo de fichas mostra os <b>amigos</b>' : ''}. Toque ${S.placar.length > 1 ? 'neles' : 'nela'} para ver.</span></div>
+    <button class="btn primary" type="button" id="jEntendi" autofocus>Entendi, vamos jogar</button></div>`, { tipo: 'como', depois: () => { ls.set('mt-tutorial-visto', true); S.primeiraVez = false; atualizarAcoesSeguro(); } });
+  f.querySelector('#jEntendi').addEventListener('click', jFechar);
+}
+function atualizarAcoesSeguro() { const st = eu(); if (st && $('#jBtns')) { atualizarAcoes(st); ligarPainel(); } }
+
+function abrirMeta() {
+  const st = eu(); if (!st) return;
+  const m = E.METAS.find((x) => x.id === st.meta); if (!m) return;
+  S.metaVista = metaChave(st); $('#bMeta')?.classList.remove('pisca');
+  $('#metaPalco')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'metaPalco'; ov.className = 'cc-palco'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'Sua meta secreta');
+  ov.innerHTML = `<div class="cc-voo"><div class="cc-giro">
+      <div class="cc-lado">${VERSO_DA_CARTA.replace('Bússola · Tempestade', 'Meta secreta')}</div>
+      <div class="cc-lado cc-frente"><div class="cc" data-tipo="meta"><div class="cc-miolo">
+        <div class="cc-cab"><span class="cc-nome">Sua meta secreta</span><span class="cc-pts"><small>+</small>${m.pts} <small>pts</small></span><span class="cc-selo">${ic('estrela')}</span></div>
+        <div class="cc-arte" aria-hidden="true"><span class="cc-estrela">${ic('estrela')}</span></div>
+        <span class="cc-faixa">Cumpra até o fim da partida</span>
+        <div class="cc-texto"><p><b>${esc(m.nome)}</b></p><p>Cumprindo, você ganha +${m.pts} pts no fim da partida.</p></div>
+        <div class="cc-rodape"><span>Só você vê<b>Os outros descobrem no fim</b></span><span>Vale<b>+${m.pts} pts</b></span></div>
+      </div></div></div></div></div>
+    <div class="cc-respostas"><div class="cc-fim"><button class="btn primary" type="button" id="jGuardar" autofocus>Guardar segredo</button></div></div>`;
+  document.body.appendChild(ov);
+  const fechar = () => { ov.remove(); document.removeEventListener('keydown', tecla); };
+  const tecla = (e) => { if (e.key === 'Escape') fechar(); };
+  document.addEventListener('keydown', tecla);
+  ov.querySelector('#jGuardar').addEventListener('click', fechar);
+  som('virar');
+  const voo = ov.querySelector('.cc-voo');
+  setTimeout(() => { if (ov.isConnected) { voo.classList.add('virada'); ov.classList.add('pronta'); ov.querySelector('#jGuardar').focus(); } }, reduzir ? 0 : 900);
+}
+
+function abrirContaJogo() {
+  const st = eu(); if (!st) return;
+  const avisos = st.avisos.slice().reverse().slice(0, 8), pts = E.pontuacao(st).total;
+  jAbrir(`<div class="j-folha" aria-label="Sua conta"><h2>Sua conta</h2>
+    <div class="j-conta-resumo"><span class="jp-val">${ic('moeda')}<b>${st.saldo}</b><small>BC</small></span><span class="jp-val"><b>${pts}</b><small>pts</small></span></div>
+    <div><div class="eyebrow" style="margin-bottom:6px">Avisos da conta</div><div class="avisos">${avisos.map((a) => `<div class="aviso ${a.tipo}">${esc(a.texto)}</div>`).join('')}</div></div>
+    <div><div class="eyebrow" style="margin-bottom:6px">Extrato · últimas 10</div><table class="extrato">${st.extrato.slice().reverse().map((x) => `<tr><td>${esc(x.d)}</td><td class="v">${x.v > 0 ? '+' : ''}${x.v} BC</td><td class="v muted">${x.s} BC</td></tr>`).join('')}</table></div>
+    <button class="btn primary" type="button" id="jPronto" autofocus>Fechar</button></div>`, { tipo: 'conta' });
+  $('#jPronto').addEventListener('click', jFechar);
+}
+function abrirAjustes() {
+  jAbrir(`<div class="j-folha" aria-label="Ajustes"><h2>Ajustes</h2><p class="sub">Efeitos sonoros e música de fundo.</p>
+    <div class="row">${botaoSom()}${botaoMusica()}</div><button class="btn primary" type="button" id="jPronto" autofocus>Pronto</button></div>`, { tipo: 'ajustes' });
+  $('#jPronto').addEventListener('click', jFechar);
+}
+function salaFolhaHtml() {
+  const s = S.sala; if (!s) return '';
+  return `<div class="j-folha" aria-label="Sala"><h2>${s.tipo === 'espera' ? 'Sala de espera' : `Sala ${esc(s.codigo)}`}</h2>
+    <p class="sub">${s.jogando ?? S.placar.length} jogando${s.max ? `, ${s.total ?? S.placar.length} de ${s.max} na sala` : ''}.</p>
+    ${anfitriao()}${S.sala.patrulhas ? patrulhasHtml() : ''}
+    <button class="btn primary" type="button" id="jPronto">Fechar</button></div>`;
+}
+function abrirSala() {
+  if (S.modo !== 'sala') return;
+  jAbrir(salaFolhaHtml(), { tipo: 'sala' });
+  $('#jPronto').addEventListener('click', jFechar); ligarAnfitriao();
+}
+function abrirSair() {
+  const sala = S.modo === 'sala';
+  jAbrir(`<div class="j-folha" role="alertdialog" aria-label="Sair do jogo"><h2>Sair do jogo?</h2>
+    <p class="sub">${sala ? 'Você sai da sala. Enquanto ela estiver aberta, dá para voltar com o código.' : 'Você volta para a tela inicial. A sua partida fica salva neste aparelho, e dá para continuar depois.'}</p>
+    <div class="duplo"><button class="btn" type="button" id="jSairSim">Sair</button><button class="btn primary" type="button" id="jSairNao" autofocus>Continuar jogando</button></div></div>`, { tipo: 'sair' });
+  $('#jSairNao').addEventListener('click', jFechar);
+  $('#jSairSim').addEventListener('click', () => { jFechar(); sairDoJogo(); });
+}
+
+// ----- Tamanho do tabuleiro: o maior quadrado que cabe no miolo da tela -----
+function ajustarJogo() {
+  const palco = $('#jPalco'), tab = $('#board'), acoes = $('#jAcoes'); if (!palco || !tab || !acoes) return;
+  const r = palco.getBoundingClientRect();
+  const paisagem = r.width >= r.height * 1.15;
+  palco.classList.toggle('paisagem', paisagem);
+  palco.classList.toggle('curta', paisagem && r.height < 340);   // celular deitado: os ícones de jogada passam para duas colunas
+  const a = acoes.getBoundingClientRect(), gap = paisagem ? 16 : 10;
+  const lado = Math.floor(Math.max(120, paisagem ? Math.min(r.width - a.width - gap, r.height) : Math.min(r.width + 16, r.height - a.height - gap)));
+  tab.style.setProperty('--lado', `${lado}px`);
+  tab.classList.toggle('com-rotulos', lado >= 600);
+  palco.style.setProperty('--larg', `${lado}px`);
+  // O que sobra de espaço vira informação, por prioridade: acontecimentos, reações e missão. Em tela curta nada aparece.
+  const temMissao = !$('#jMissao')?.dataset.vazio, temReacoes = !!$('#reacoes');
+  let ver = { A: false, R: false, M: false }, lat = 0;
+  if (!paisagem) {
+    let livre = r.height - lado - a.height - gap;
+    if (livre >= 78) { ver.A = true; livre -= 64; }
+    if (ver.A && temReacoes && livre >= 66) { ver.R = true; livre -= 50; }
+    if (ver.A && temMissao && livre >= 58) ver.M = true;
+  } else {
+    const sobra = r.width - a.width - 2 * gap - lado;
+    if (sobra >= 240) { ver = { A: true, R: temReacoes, M: temMissao }; lat = Math.min(320, Math.floor(sobra)); }
+  }
+  palco.style.setProperty('--lat', `${lat}px`);
+  palco.classList.toggle('ver-acontece', ver.A); palco.classList.toggle('ver-reacoes', ver.R); palco.classList.toggle('ver-missao', ver.M); palco.classList.toggle('ver-baixo', ver.R || ver.M);
+}
+
+function montarJogo() {
+  const sala = S.modo === 'sala';
+  return `<div class="j-tela" id="jTela">
+    <header class="j-topo" id="jTopo">
+      <div class="j-jogador" id="jJogador"></div>
+      <div class="j-icones">
+        <button class="j-icbtn j-meta" id="bMeta" type="button" aria-label="Meta secreta: toque para ver">${ic('estrela')}</button>
+        <button class="j-amigos" id="bAmigos" type="button" aria-expanded="false" aria-controls="jAmigos" aria-label="Amigos" hidden><span class="j-pilha" id="jPilha"></span>${ic('seta')}</button>
+      </div>
+      <section class="j-painel-amigos" id="jAmigos" hidden aria-label="Amigos"></section>
+      <div class="timer" id="timer" hidden><i></i></div>
+      <div class="j-pend" id="pend"></div>
+    </header>
+    <main class="j-palco" id="jPalco">
+      <div class="j-lateral">
+        <section class="j-acontece" id="jAcontece" aria-label="Acontecimentos"></section>
+        <div class="j-baixo"><div class="j-missao" id="jMissao" data-vazio="1"></div>${sala ? reacoesHtml() : ''}</div>
+      </div>
+      ${montarTabuleiro()}
+      <div class="j-acoes" id="jAcoes"><div class="j-btns" id="jBtns"></div>
+        <div class="j-minis">
+          <button class="j-mini" id="bComo" type="button" aria-label="Como jogar a sua vez">?</button>
+          <button class="j-mini" id="bAjustes" type="button" aria-label="Ajustes de som e música">${ic('ajustes')}</button>
+          ${sala ? `<button class="j-mini" id="bSala" type="button" aria-label="Sala e anfitrião">${ic('sala')}</button>` : ''}
+          <button class="j-mini sai" id="bSair" type="button" aria-label="Sair do jogo">${ic('sair')}</button>
+        </div>
+      </div>
+    </main>
+    <footer class="j-kit" id="jKit"></footer>
+  </div>`;
 }
 
 function atualizarPainel() {
-  const st = eu(); const el = $('#painel'); if (!st || !el) return;
-  const j = painelJanela();
-  el.innerHTML = j.html + (j.exclusivo ? '' : painelOfertas() + painel(st)); ligarPainel(); tique();
+  const st = eu(); if (!st || !$('#jBtns')) return;
+  atualizarAcoes(st); atualizarDecisao(st); atualizarJanela(st);
+  ligarPainel(); tique();
   atualizarLojaGrande();   // a barraca aberta acompanha o carrinho, os avisos e os erros
 }
-function atualizarMural() { const el = $('#mural'); if (el) el.innerHTML = muralHtml(); }
 
-// Redesenha só os painéis; o tabuleiro e os peões continuam na tela.
+// Redesenha só o que mudou; o tabuleiro e os peões continuam na tela.
 function atualizarJogo() {
   const st = eu();
   if (S.tela !== 'jogo' || !st) return;
   const nova = !$('#board');
   if (nova) { app.innerHTML = montarJogo(); S.peaoPos = {}; ligarFixos(); }
-  const topoEl = $('#topo-jogo'); topoEl.innerHTML = barraTopo(st); $('#sair')?.addEventListener('click', sairDoJogo);
-  const cor = S.modo === 'sala' ? (S.eu?.cor || COR_SOLO) : COR_SOLO;
-  $('#conta-box').innerHTML = conta(st, cor);
+  atualizarTopo(st); atualizarKit(st); atualizarFaixas();
   atualizarPainel();
-  if (S.modo === 'sala') {
-    atualizarPlacar(); $('#patrulhas').innerHTML = patrulhasHtml(); $('#anfitriao').innerHTML = anfitriao(); atualizarMural(); ligarAnfitriao();
-  } else atualizarPlacar();
-  $('#missao').innerHTML = missaoHtml();
-  $('#missao details')?.addEventListener('toggle', (e) => { S.missaoAberta = e.currentTarget.open; });
-  atualizarCasas(st); atualizarCentro(st); atualizarPontes();
+  atualizarCasas(st); atualizarNota(st); atualizarPontes();
   if (nova || !S.cenaEmCurso) sincronizarPeoes(S.placar);
+  if ($('#jFolha')?.dataset.tipo === 'sala') { $('#jFolha').innerHTML = salaFolhaHtml(); $('#jPronto')?.addEventListener('click', jFechar); ligarAnfitriao(); }
+  ajustarJogo();
+  if (nova && !ls.get('mt-tutorial-visto', false) && !st.pend && !st.rolou && st.rodada === 0) { S.primeiraVez = true; atualizarAcoesSeguro(); setTimeout(() => { if (S.tela === 'jogo' && !$('#jFolha')) abrirComoJogar(true); }, 500); }
   tique();
 }
 
@@ -1947,16 +2174,19 @@ function telaJogo() {
   return null;
 }
 
-// Ligações que valem para o jogo todo (tabuleiro e reações): feitas uma vez, quando o tabuleiro nasce.
+// Ligações que valem para o jogo todo: feitas uma vez, quando o tabuleiro nasce.
+let GLOBAIS = false;
 function ligarFixos() {
-  app.querySelectorAll('[data-reacao]').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-reacao]').forEach((b) => b.addEventListener('click', () => {
     if (Date.now() < S.reacaoLivreEm) return;
     S.reacaoLivreEm = Date.now() + E.REACAO_INTERVALO_MS;
     enviar({ t: 'reagir', i: Number(b.dataset.reacao) });
-    const todos = app.querySelectorAll('[data-reacao]');
+    const todos = document.querySelectorAll('[data-reacao]');
     todos.forEach((x) => { x.disabled = true; });
     setTimeout(() => todos.forEach((x) => { x.disabled = false; }), E.REACAO_INTERVALO_MS);
   }));
+  if (!GLOBAIS) {
+  GLOBAIS = true;
   const abrirFichaDoPlacar = (e) => {
     const plEl = e.target.closest('[data-ordem-placar]');
     if (!plEl || (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ')) return;
@@ -1966,22 +2196,35 @@ function ligarFixos() {
   };
   app.addEventListener('click', abrirFichaDoPlacar);
   app.addEventListener('keydown', abrirFichaDoPlacar);
-  if (window.ResizeObserver) new ResizeObserver(() => layoutPeoes()).observe($('#board'));
+  // composedPath guarda por onde o clique passou, mesmo que o painel se redesenhe no meio do caminho (como ao trocar de aba).
+  document.addEventListener('click', (e) => { const p = $('#jAmigos'); if (p && !p.hidden && !e.composedPath().includes(p)) alternarAmigos(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') alternarAmigos(false); });
+  }
+  $('#bAmigos').addEventListener('click', (e) => { e.stopPropagation(); alternarAmigos(); });
+  $('#jAmigos').addEventListener('click', (e) => { const b = e.target.closest('[data-aba]'); if (b) { S.aba = b.dataset.aba; atualizarAmigos(); } });
+  $('#bMeta').addEventListener('click', abrirMeta);
+  $('#jJogador').addEventListener('click', (e) => { if (e.target.closest('#bConta')) abrirContaJogo(); });
+  $('#bComo').addEventListener('click', () => abrirComoJogar(false));
+  $('#bAjustes').addEventListener('click', abrirAjustes);
+  $('#bSala')?.addEventListener('click', abrirSala);
+  $('#bSair').addEventListener('click', abrirSair);
+  if (window.ResizeObserver) { new ResizeObserver(() => layoutPeoes()).observe($('#board')); new ResizeObserver(ajustarJogo).observe($('#jPalco')); }
   // Com folga e sem economia de dados, já baixa os outros cenários para a troca não esperar a rede.
   if (!navigator.connection?.saveData) setTimeout(() => document.querySelectorAll('.cenario img').forEach(carregarCenario), 8000);
 }
 
 function ligarPainel() {
-  $('#rolar')?.addEventListener('click', () => acao('rolar'));
-  $('#duplo')?.addEventListener('click', () => acao('dado_duplo'));
-  $('#ajudar')?.addEventListener('click', () => acao('ajudar'));
-  app.querySelectorAll('[data-esc]').forEach((b) => b.addEventListener('click', () => acao('escolher_dado', { i: Number(b.dataset.esc) })));
+  $('#rolar')?.addEventListener('click', () => { S.primeiraVez = false; acao('rolar'); });
+  $('#duplo')?.addEventListener('click', () => { S.primeiraVez = false; acao('dado_duplo'); });
+  $('#ajudar')?.addEventListener('click', () => { S.primeiraVez = false; acao('ajudar'); });
+  $('#reabrir')?.addEventListener('click', () => {
+    const st = eu(); if (!st?.pend) return;
+    if (st.pend.tipo === 'loja') abrirLojaGrande(st.pend.loja, false);
+    else if (st.pend.tipo === 'carta') abrirCartaGrande(st, st.pend.carta);
+    else atualizarPainel();
+  });
+  document.querySelectorAll('[data-esc]').forEach((b) => b.addEventListener('click', () => acao('escolher_dado', { i: Number(b.dataset.esc) })));
   $('#verRes')?.addEventListener('click', () => { S.verTab = false; ir('resultado'); });
-  app.querySelectorAll('[data-item]').forEach((c) => c.addEventListener('change', () => { S.carrinho[c.dataset.item] = c.checked; S.erro = ''; atualizarPainel(); }));
-  $('#pagarLoja')?.addEventListener('click', () => acao('comprar', { itens: Object.keys(S.carrinho).filter((k) => S.carrinho[k]) }));
-  $('#sairLoja')?.addEventListener('click', () => acao('sair_loja'));
-  $('#verBarraca')?.addEventListener('click', () => { const st = eu(); if (st?.pend?.tipo === 'loja') abrirLojaGrande(st.pend.loja, false); });
-  app.querySelectorAll('[data-resp]').forEach((b) => b.addEventListener('click', () => acao('responder', { i: Number(b.dataset.resp) })));
   $('#pagar')?.addEventListener('click', () => acao('pagar'));
   $('#arriscar')?.addEventListener('click', () => acao('arriscar'));
   $('#trocaDar')?.addEventListener('change', (e) => { S.troca.dar = e.target.value; atualizarPainel(); });
@@ -1989,13 +2232,13 @@ function ligarPainel() {
   $('#trocarBau')?.addEventListener('click', () => acao('trocar_bau', { dar: S.troca.dar, querer: S.troca.querer }));
   $('#oferecer')?.addEventListener('click', () => acao('oferecer_troca', { dar: S.troca.dar, querer: S.troca.querer }));
   $('#sairTroca')?.addEventListener('click', () => acao('sair_troca'));
-  app.querySelectorAll('[data-aceitar]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'aceitar_troca', de: Number(b.dataset.aceitar) })));
-  app.querySelectorAll('[data-voto]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'votar_evento', i: Number(b.dataset.voto) })));
-  app.querySelectorAll('[data-lance]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'dar_lance', valor: Number(b.dataset.lance) })));
+  document.querySelectorAll('[data-aceitar]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'aceitar_troca', de: Number(b.dataset.aceitar) })));
+  document.querySelectorAll('[data-voto]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'votar_evento', i: Number(b.dataset.voto) })));
+  document.querySelectorAll('[data-lance]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'dar_lance', valor: Number(b.dataset.lance) })));
 }
 
 function ligarAnfitriao() {
-  app.querySelectorAll('[data-mestre]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'mestre', tipo: b.dataset.mestre })));
+  document.querySelectorAll('[data-mestre]').forEach((b) => b.addEventListener('click', () => enviar({ t: 'mestre', tipo: b.dataset.mestre })));
   $('#nPatrulhas')?.addEventListener('change', (e) => { S.nPatrulhas = Number(e.target.value); });
   $('#sortear')?.addEventListener('click', () => enviar({ t: 'patrulhas', n: Number($('#nPatrulhas').value) }));
   $('#abrirLeilao')?.addEventListener('click', () => enviar({ t: 'abrir_leilao' }));
@@ -2086,7 +2329,8 @@ function ligarResultado() {
 }
 
 function render() {
-  if (S.tela !== 'jogo') { $('#cartaPalco')?.remove(); $('#lojaPalco')?.remove(); }   // carta e barraca só existem na tela do jogo
+  if (S.tela !== 'jogo') for (const id of ['cartaPalco', 'lojaPalco', 'metaPalco', 'jFolha', 'jDecisao', 'jJanela']) $(`#${id}`)?.remove();   // carta, barraca e janelas só existem na tela do jogo
+  document.documentElement.classList.toggle('em-jogo', S.tela === 'jogo' && !!eu());   // no jogo a página não rola
   if (S.tela === 'entrada') { app.innerHTML = telaEntrada(); ligarEntrada(); }
   else if (S.tela === 'fila') { app.innerHTML = telaFila(); ligarFila(); }
   else if (S.tela === 'trilha') { app.innerHTML = telaTrilha(); ligarTrilha(); }
@@ -2120,6 +2364,8 @@ function tique() {
     const pend = $('#pend');
     if (pend) pend.textContent = resto < 10000 && S.sala.pendentes?.length ? `Ainda decidindo: ${S.sala.pendentes.join(', ')}` : '';
   }
+  // Votação, leilão e ofertas esperavam outra janela fechar: abrem assim que o caminho estiver livre.
+  if (S.tela === 'jogo' && S.sala && (S.sala.voto || S.sala.leilao || S.sala.ofertas?.length) && !$('#jJanela')) atualizarJanela(eu());
   document.querySelectorAll('[data-fim]').forEach((el) => {
     el.textContent = `${Math.max(0, Math.ceil((Number(el.dataset.fim) - agora) / 1000))} s`;
   });

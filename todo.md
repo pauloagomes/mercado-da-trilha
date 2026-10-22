@@ -73,3 +73,5 @@ O formato de pedra utilizado no tabuleiro assemelha-se a lajes espessas ou bloco
 
 - [x] colocar sons nas ações, acertos e erros, e colocar uma trila de fundo.
 
+
+- [x] Tela do jogo numa tela só, sem rolagem: tabuleiro no maior tamanho, dados viraram três ícones (um dado, dado duplo e ajudar no acampamento), saldo e pontos como placar junto da ficha, meta secreta em ícone que pisca, "Amigos" em grupo de fichas que abre, kit no rodapé e botão de sair com confirmação. O espaço que sobra mostra acontecimentos, reações e a missão da sala. Detalhes no README, "Tela do jogo, sem rolagem".

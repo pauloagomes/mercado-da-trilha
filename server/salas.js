@@ -219,7 +219,7 @@ function infoSala(sala, paraId) {
     rodadaSync: sala.rodadaSync, fimRodadaEm: sala.fimRodadaEm, agora: Date.now(),
     souAnfitriao: sala.anfitriao === paraId,
     baseMs: RODADA_MS(),
-    missao: { nome: E.missaoPorId(sala.missao.id).nome, desc: E.descreverMissao(sala.missao), pts: E.MISSAO_PTS,
+    missao: { nome: E.missaoPorId(sala.missao.id).nome, itens: E.missaoPorId(sala.missao.id).itens, desc: E.descreverMissao(sala.missao), pts: E.MISSAO_PTS,
       vencedor: sala.missao.vencedor ? sala.jogadores.get(sala.missao.vencedor)?.st.apelido || null : null },
     ofertas: lista.filter((p) => p !== sala.jogadores.get(paraId) && E.ofertaAtiva(p.st)).map((p) => ({
       de: p.ordem, apelido: p.st.apelido, dar: p.st.oferta.dar, querer: p.st.oferta.querer,
