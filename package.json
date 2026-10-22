@@ -2,6 +2,8 @@
   "name": "mercado-da-trilha",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "author": "Paulo Afonso Gomes Fernandes Consultoria em Tecnologia da Informação LTDA",
   "description": "Jogo de treino da carteira de evento do Trilha HUB, com a moeda BadenCoin.",
   "type": "module",
   "engines": {
@@ -11,6 +13,9 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node --test test/*.test.js",
+    "simular": "node test/simular.mjs",
+    "test:integracao": "node test/salas.integracao.mjs",
+    "metricas": "node server/metricas.js",
     "migrate": "node server/migrate.js"
   },
   "dependencies": {
@@ -19,6 +24,7 @@
     "@fastify/static": "^10.1.6",
     "@fastify/websocket": "^11.0.2",
     "fastify": "^5.2.1",
+    "nodemailer": "^10.2.0",
     "pg": "^8.13.3"
   },
   "devDependencies": {
