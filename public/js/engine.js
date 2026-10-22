@@ -63,13 +63,13 @@ export const FICHAS = [
   { id: 'f03', nome: 'Escoteira de cabelo cacheado' },
   { id: 'f04', nome: 'Escoteiro de óculos' },
   { id: 'f05', nome: 'Escoteira de hijab' },
-  { id: 'f06', nome: 'Escoteiro cadeirante' },
+  { id: 'f06', nome: 'Escoteiro de cabelo castanho' },
   { id: 'f07', nome: 'Sênior de cabelo crespo' },
   { id: 'f08', nome: 'Sênior de cabelo liso' },
   { id: 'f09', nome: 'Pioneira de rabo de cavalo' },
   { id: 'f10', nome: 'Pioneiro de barba' },
   { id: 'f11', nome: 'Chefe de chapéu' },
-  { id: 'f12', nome: 'Chefe de cabelos brancos' },
+  { id: 'f12', nome: 'Chefe de cabelos brancos e óculos' },
 ];
 
 // Nível do perfil: define quais cartas saem no baralho do jogador. Cada carta tem `nivel: 'lobinho'` (só Lobinhos),

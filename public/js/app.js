@@ -19,7 +19,8 @@ const $ = (s, r = document) => r.querySelector(s);
 const app = $('#app');
 const ic = (id) => `<svg class="ic" aria-hidden="true"><use href="#i-${id}"/></svg>`;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fichaSrc = (id) => `img/fichas/${encodeURIComponent(id || 'f01')}.svg`;
+// Duas medidas de cada personagem: 128 px para placar, peões e escolha; 256 px (-g) para a ficha aberta no meio da tela.
+const fichaSrc = (id, grande = false) => `img/fichas/${encodeURIComponent(id || 'f01')}${grande ? '-g' : ''}.webp`;
 const fichaNome = (id) => E.FICHAS.find((f) => f.id === id)?.nome || 'Ficha';
 const bc = (v) => `<span class="bc">${v} BC</span>`;
 const reduzir = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -737,7 +738,7 @@ function mostrarDetalhesFicha(p) {
   el.id = 'fichaModal';
   el.innerHTML = `
     <div class="ficha-modal" role="dialog" aria-modal="true" aria-labelledby="fmNome" style="--pc:${esc(p.cor || 'var(--sun)')}">
-      <img src="${fichaSrc(p.ficha)}" alt="${esc(fichaNome(p.ficha))}">
+      <img src="${fichaSrc(p.ficha, true)}" alt="${esc(fichaNome(p.ficha))}">
       <div class="fm-nome" id="fmNome">${esc(p.apelido)}${p.eu ? ' (você)' : ''}</div>
       <div class="fm-pts">${p.pontos} pts</div>
       <div class="fm-info">Ficha: <b>${esc(fichaNome(p.ficha))}</b></div>

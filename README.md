@@ -186,7 +186,7 @@ Três imagens com o mesmo enquadramento em `public/img/cenario/` (dia, noite e c
 
 ## Fichas
 
-As 12 fichas em `public/img/fichas/` são **provisórias**, desenhadas em SVG simples. Substitua pelas artes geradas por IA e revisadas, mantendo os mesmos nomes de arquivo (`f01.svg` a `f12.svg`, ou troque a extensão em `fichaSrc` no `app.js`) e os nomes em `FICHAS` no `engine.js`. Formato: redondo, 256 px, fundo transparente, uniforme genérico sem a flor-de-lis oficial nem logotipos dos Escoteiros do Brasil.
+As 12 fichas (personagens) ficam em `public/img/fichas/`, de `f01` a `f12`, cada uma em duas medidas WebP com fundo transparente: `fNN.webp` (128 px, para placar, peões e escolha) e `fNN-g.webp` (256 px, para a ficha aberta no meio da tela). Para trocar uma arte, mantenha o nome do arquivo e o nome em `FICHAS` no `engine.js` (ele também serve de texto alternativo da imagem). Formato: redondo, uniforme genérico sem a flor-de-lis oficial nem logotipos dos Escoteiros do Brasil. Os personagens são só o rosto e os ombros, então a ficha de cadeirante deixou de existir nesta versão da arte.
 
 ## Simulação de balanceamento
 

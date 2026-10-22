@@ -64,7 +64,7 @@ Só para desenvolvimento e testes: `ws` 8.22.0 (MIT), https://github.com/websock
 
 | Componente | Origem | Situação |
 | --- | --- | --- |
-| Fichas (`public/img/fichas/f01.svg` a `f12.svg`) | Desenhadas para o projeto, provisórias | Serão trocadas pelas artes finais; licença das artes a definir |
+| Fichas (`public/img/fichas/f01.webp` a `f12.webp` e `f01-g.webp` a `f12-g.webp`) | Personagens enviados pelo responsável do projeto (pacote `personagens_escoteiros`) | Origem e licença das artes a confirmar antes do lançamento |
 | Cenário (`public/img/cenario/*.webp`) | Gerado por IA no Higgsfield (Z Image e Seedream 5.0 Flash), em 21/10/2026 | Uso comercial permitido pelos Termos de Uso do Higgsfield (versão de 26/07/2026, seção 4.4), em qualquer plano. Distribuídas junto com o código, sob a MIT. Avaliação completa em `docs/arte/cenario.md`, seção "Direitos de uso" |
 | Ícones do jogo (SVG dentro do `index.html`) | Desenhados para o projeto | Mesma licença do código |
 | Sons | Gerados no navegador pela Web Audio API, sem arquivos | Mesma licença do código |

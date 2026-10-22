@@ -24,6 +24,7 @@ Estado: as etapas 1 a 4 do RFC "Mercado da Trilha mais divertido e interativo" e
 - [ ] Pagamento recusado abaixo da meta: decidir se mexe no valor do dado duplo, nos pedágios ou no jogador de referência da simulação.
 - [ ] Ligar o e-mail do responsável em produção (`SMTP_URL`, `EMAIL_DE`). Com a conta criada pelo responsável, o e-mail deixa de ser opcional: sem ele só o jogo sozinho funciona. Nunca usar `EMAIL_MODO=log` ou `teste` em produção.
 - [ ] Definir `SEGREDO_RECUPERACAO` em produção.
+- [ ] Tirar o Pix do texto do evento "Visita dos pais" (`public/js/engine.js`: descrição do evento, aviso da conta e extrato dizem "recarga por Pix"). As cartas já não citam Pix nem extrato. Decidir o texto novo, por exemplo "Visita dos pais: +30 BC", e atualizar o teste e o README se citarem o texto antigo.
 - [ ] Prazo de retenção dos dados: a política diz "enquanto a conta existir". Decidir se contas paradas há muito tempo são apagadas sozinhas (hoje não há limpeza automática de partidas, insígnias e histórico).
 - [x] Contato para dúvidas e pedidos de remoção: GitHub do projeto (Issue sem dado pessoal; pedido sobre uma conta passa para um canal privado).
 - [ ] Revisão jurídica da política de uso abaixo, principalmente por envolver crianças (LGPD).
