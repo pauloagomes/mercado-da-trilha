@@ -31,7 +31,9 @@ em casos graves ou recorrentes, restringir a participação no projeto.
 
 ## Reportes
 
-Comportamentos inadequados devem ser reportados pelos canais oficiais do
-projeto, evitando a exposição pública de informações pessoais.
+Comportamentos inadequados devem ser reportados pelo GitHub do projeto,
+evitando a exposição pública de informações pessoais. Se o caso envolver dado
+pessoal ou não puder ser tratado em público, abra uma Issue pedindo contato
+privado, sem detalhes.
 
 Este documento poderá evoluir conforme a comunidade crescer.

@@ -210,7 +210,7 @@ Consulte o [SECURITY.md](SECURITY.md).
 
 ### Marcas
 
-O código é MIT, mas marcas, logos e identidade visual do Trilha Hub não fazem
+O código é MIT, mas marcas, logos e identidade visual do Trilha HUB não fazem
 parte automaticamente da licença. Consulte o [TRADEMARKS.md](TRADEMARKS.md).
 
 ### Terceiros

@@ -52,3 +52,14 @@ Stylized 3D game-art environment for a mobile board game, near top-down view (ab
 - **Uma palmeira à direita invade a clareira**, ao lado da coluna de casas da direita.
 
 Para corrigir, gere o Dia de novo com a "base completa" num modelo melhor (Soul Location ou GPT Image 2, que exigem plano ou créditos) e refaça Noite e Chuva por edição dele, com os mesmos prompts.
+
+## Direitos de uso
+
+Avaliado em 21/10/2026 contra os [Termos de Uso do Higgsfield](https://higgsfield.ai/terms-of-use-agreement), versão de 26/07/2026. Não é parecer jurídico.
+
+- **Uso comercial: permitido.** Pela seção 4.4, o Higgsfield não reivindica a propriedade dos resultados e não restringe o uso comercial. Os termos não fazem distinção entre plano gratuito e pago; a [central de ajuda](https://higgsfield.ai/creator-hub/help-center/account-and-privacy/who-owns-my-generations-and-can-i-use-them-commercially) diz o mesmo. Um artigo de terceiros afirma que o plano gratuito não permite uso comercial, mas isso não está no texto oficial, que é o que vale.
+- **Marca d'água.** Os termos avisam que alguns planos geram a imagem com marca d'água. Conferi as três imagens e nenhuma tem marca visível.
+- **Modelos de terceiros.** Pela seção 8, o Z Image e o Seedream 5.0 Flash também seguem a política de uso aceitável de quem os fornece, e vale a regra mais restritiva. Uma clareira sem pessoas, marcas ou texto não esbarra em nenhuma delas.
+- **Sem garantia de originalidade.** Pelas seções 4.4, 12 e 13.2, o Higgsfield não garante que a imagem seja única ou original, e quem a usa responde se ela infringir direito de alguém. Para um cenário genérico de mata, o risco é baixo, mas vale olhar de novo as artes finais antes de usá-las em material de divulgação.
+- **Treino de modelos.** A seção 4.4 permite ao Higgsfield usar o que não for privado para treinar modelos. Não afeta o jogo.
+- **Direito autoral no Brasil.** A Lei 9.610/1998 (art. 11) protege obras criadas por pessoa física. Uma imagem gerada por IA, só a partir de um prompt, dificilmente tem proteção própria: a empresa pode usá-la, mas não consegue impedir que outra pessoa a copie. Por isso as imagens vão sob a mesma MIT do código, e a identidade visual que a empresa precisa proteger deve ser feita ou finalizada por uma pessoa.

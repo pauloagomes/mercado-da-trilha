@@ -5,8 +5,13 @@
 Se você encontrar uma vulnerabilidade de segurança, não publique detalhes
 sensíveis em uma Issue pública ou Pull Request.
 
-Sempre que possível, utilize um canal privado disponibilizado pelos
-mantenedores do projeto para reportar a vulnerabilidade.
+O canal é o reporte privado de vulnerabilidades do GitHub: no repositório do
+projeto, abra a aba **Security** e clique em **Report a vulnerability**. Só os
+mantenedores veem o reporte, e a conversa sobre a correção continua ali, em
+particular.
+
+Se a opção não aparecer, abra uma Issue pedindo um canal privado, sem nenhum
+detalhe da falha.
 
 O reporte deve incluir:
 
