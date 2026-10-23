@@ -1,0 +1,11 @@
+# Para servidores que já têm um nginx (ou outro proxy) com o HTTPS na frente:
+#   docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d --build
+# O nginx do jogo deixa as portas 80 e 443 e escuta só em 127.0.0.1:${PORTA_PROXY:-3070}, em HTTP.
+services:
+  nginx:
+    ports: !override
+      - "127.0.0.1:${PORTA_PROXY:-3070}:80"
+    volumes: !override
+      - ./nginx/atras-de-proxy:/etc/nginx/templates:ro
+      - ./public:/usr/share/nginx/html:ro
+      - registros:/var/log/nginx/acesso

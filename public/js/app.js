@@ -75,6 +75,8 @@ const S = {
   rodadas: ls.get('mt-rodadas', E.RODADAS_PADRAO),
   online: false, registrado: false,   // registrado: há um perfil escolhido neste aparelho, dentro de uma conta
   temConta: false, perfilId: null, perfis: [], maxPerfis: 6,
+  perfilEditor: null,    // tela de editor: { modo: 'local'|'novo'|'editar', id?, form, pontuacao?, apagar, codigo }
+  editandoPerfis: false, // tela de perfis em modo de edição (mostra o lápis em cada ficha)
   modo: null,            // 'solo' | 'sala'
   solo: null,            // estado do motor no jogo solo (o que se vê é S.eu, uma cópia)
   sala: null, eu: null, placar: [], mural: [], fila: null, pontes: {},
@@ -100,6 +102,9 @@ function toast(msg, tentativa = 0) {
   clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 3800);
 }
 function ir(tela) { S.tela = tela; S.erro = ''; if (tela !== 'jogo') S.verTab = false; render(); window.scrollTo({ top: 0 }); }
+// Para onde "voltar" ou "sair" deve levar: quem já tem um perfil (registrado, ou jogando sem conta) cai no
+// menu "Como vai jogar?"; quem ainda não escolheu nada cai na tela de entrada (login).
+const irMenu = () => ir((S.registrado || S.perfil.apelido.trim()) ? 'modos' : 'entrada');
 const eu = () => S.eu;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -237,6 +242,7 @@ async function iniciar() {
     if (sala && S.registrado) { S.modo = 'sala'; S.tela = 'jogo'; S.cenasN = null; reiniciarFaixas(); await conectar(); enviar({ t: 'entrar', codigo: sala }); }
   } catch { S.online = false; }
   if (S.temConta && !S.registrado && S.tela === 'entrada') { abrirPerfis(); return; }   // conta sem perfil escolhido aqui
+  if (S.tela === 'entrada' && (S.registrado || S.perfil.apelido.trim())) S.tela = 'modos';   // já tem perfil: vai direto para "como vai jogar"
   render();
 }
 
@@ -311,13 +317,13 @@ function receber(m) {
   } else if (m.t === 'outro_aparelho') {
     // O mesmo perfil abriu as salas em outro aparelho: este sai da sala ou da fila, mas continua na conta.
     S.modo = null; S.sala = null; S.fila = null; S.eu = null; S.placar = []; S.peaoPos = {}; ls.del('mt-sala');
-    toast(m.msg); ir('entrada');
+    toast(m.msg); irMenu();
   } else if (m.t === 'fila_saiu') {
-    toast(m.msg); S.fila = null; ir('entrada');
+    toast(m.msg); S.fila = null; irMenu();
   } else if (m.t === 'erro') {
     S.aguardando = false;
     if (S.tela === 'jogo' && eu()?.pend?.tipo === 'loja') { S.erro = m.msg; atualizarJogo(); } else { toast(m.msg); atualizarJogo(); }
-    if (/não encontrada|encerrada|já começou/.test(m.msg) && S.tela !== 'resultado') { ls.del('mt-sala'); S.modo = null; ir('entrada'); }
+    if (/não encontrada|encerrada|já começou/.test(m.msg) && S.tela !== 'resultado') { ls.del('mt-sala'); S.modo = null; irMenu(); }
   } else if (m.t === 'reacao') {
     mostrarReacao(m);
   } else if (m.t === 'revanche_sala') {
@@ -1139,11 +1145,11 @@ async function entrarNaFila() {
   ir('fila');
   enviar({ t: 'fila_entrar' });
 }
-function sairDaFila() { enviar({ t: 'fila_sair' }); S.fila = null; ir('entrada'); }
+function sairDaFila() { enviar({ t: 'fila_sair' }); S.fila = null; irMenu(); }
 function sairDoJogo() {
   if (S.modo === 'sala') { enviar({ t: 'sair_sala' }); ls.del('mt-sala'); }
   S.modo = null; S.sala = null; S.eu = null; S.placar = []; S.mural = []; S.pontes = {}; S.peaoPos = {}; pendentes.length = 0;
-  ir('entrada');
+  irMenu();
 }
 
 // ---------- Chamas do Fogo de Conselho ----------
@@ -1190,7 +1196,33 @@ function topo(extra = '') {
   return `<header class="top"><div class="wrap"><span class="logo" aria-label="Mercado da Trilha">${ic('moeda')}<span class="logo-txt" aria-hidden="true">Mercado da <span>Trilha</span></span></span>${extra}</div></header>`;
 }
 
+// Passo 1: login. Só a conta do responsável (e-mail + código) ou o jogo sem conta; nada de perfil ainda.
 function telaEntrada() {
+  return `
+  <section class="hero"><div class="wrap">
+    <div class="row" style="justify-content:space-between"><div class="eyebrow" style="color:var(--sun)">Jogo de treino da conta digital</div><div class="row" style="gap:6px">${botaoSom()}${botaoMusica()}</div></div>
+    <h1>Mercado da <span>Trilha</span></h1>
+    <p>Monte o Kit de Acampamento gastando BadenCoin (BC) nas barracas. Confira cada gasto, acerte as cartas e termine com o maior número de pontos.</p>
+  </div></section>
+  <div class="wrap entrada">
+    <div class="box">
+      <h2>Entrar para jogar</h2>
+      <p class="note">Com a conta do responsável (e-mail + código), a criança joga em salas, faz o desafio do dia e guarda o histórico e as insígnias em Minha trilha. Sem conta, só o jogo sozinho neste aparelho.</p>
+      <button class="btn big primary" id="abrirConta" ${S.online ? '' : 'disabled'}>Entrar ou criar a conta do responsável</button>
+      <div class="ou-sep"><span></span>ou<span></span></div>
+      <button class="btn" id="semConta">Jogar sem conta, só neste aparelho</button>
+    </div>
+    ${S.online ? '' : '<p class="note">Sem conexão com o servidor: a conta do responsável fica indisponível, mas você pode jogar sozinho.</p>'}
+  </div>
+  <footer class="wrap rodape"><span class="tb">Um jogo do Trilha HUB</span>${linkHub('entrada', 'Conheça o Trilha HUB')}</footer>`;
+}
+function ligarEntrada() {
+  $('#abrirConta')?.addEventListener('click', () => abrirConta());
+  $('#semConta')?.addEventListener('click', () => abrirEditorLocal());
+}
+
+// Passo 3: como vai jogar. Já há um perfil (da conta ou local); escolhe a duração e o modo.
+function telaModos() {
   const p = S.perfil, bruto = ls.get('mt-solo', null), rec = ls.get('mt-recorde', null);
   // A partida salva só aparece para o perfil que a começou (ou sem conta, se começou sem conta).
   const salvo = bruto && bruto.v === E.VERSAO_ESTADO && bruto.estados?.eu && !bruto.estados.eu.fim && (!bruto.perfil || bruto.perfil === S.perfilId) ? bruto : null;
@@ -1204,32 +1236,21 @@ function telaEntrada() {
     ['fogo', 'Mais 20 BC e uma fogueira na tela.'],
     ['troca', 'Troque um item do kit por outro. Nenhum BC muda de conta.'],
   ];
-  return `
-  <section class="hero"><div class="wrap">
-    <div class="row" style="justify-content:space-between"><div class="eyebrow" style="color:var(--sun)">Jogo de treino da conta digital</div><div class="row" style="gap:6px">${botaoSom()}${botaoMusica()}</div></div>
-    <h1>Mercado da <span>Trilha</span></h1>
-    <p>Monte o Kit de Acampamento gastando BadenCoin (BC) nas barracas. Confira cada gasto, acerte as cartas e termine com o maior número de pontos.</p>
-  </div></section>
+  return `${topo(`<span class="chip">Como vai jogar?</span><span class="sp"></span>${botaoSom()}${botaoMusica()}`)}
   <div class="wrap entrada">
-    <div class="box">
-      <h2>Quem vai jogar?</h2>
-      <label class="f">Apelido<input type="text" id="apelido" maxlength="20" autocomplete="nickname" placeholder="Ex.: Lobo Veloz" value="${esc(p.apelido)}"></label>
-      <div class="stack" style="gap:6px"><span class="f" style="font-weight:600;font-size:.9rem">Escolha a sua ficha</span>
-        <div class="fichas" role="radiogroup" aria-label="Fichas">${E.FICHAS.map((f) => `<button type="button" class="ficha-op" role="radio" aria-checked="${p.ficha === f.id}" data-ficha="${f.id}" title="${esc(f.nome)}"><img src="${fichaSrc(f.id)}" alt="${esc(f.nome)}"></button>`).join('')}</div>
-        <span class="note" id="fichaNome">${esc(fichaNome(p.ficha))}</span>
-      </div>
-      <div class="stack" style="gap:6px"><span class="f" style="font-weight:600;font-size:.9rem">Seu nível</span>${nivelHtml(p.nivel, 'data-nivel')}
-        <span class="note">Define as cartas que saem para você. Lobinhos leem o texto curto.</span></div>
-      <label class="f" style="max-width:340px">Duração (jogo sozinho e sala com código)<select id="rodadas">${E.RODADAS_OPCOES.map((n) => `<option value="${n}" ${n === S.rodadas ? 'selected' : ''}>${n} rodadas${n === E.RODADAS_PADRAO ? ' (padrão)' : ''}</option>`).join('')}</select></label>
-      ${S.registrado
-        ? `<div class="conta-linha ok"><p>Jogando como <b>${esc(p.apelido)}</b>, na conta do responsável. Salas, desafio do dia, recordes e Minha trilha liberados.</p><button class="btn sm" id="trocarPerfil">Trocar de perfil</button></div>`
-        : S.temConta ? '<div class="conta-linha"><p><b>Escolha quem vai jogar neste aparelho.</b></p><button class="btn" id="trocarPerfil">Escolher o perfil</button></div>'
-        : `<div class="conta-linha"><p><b>Sem conta, só o jogo sozinho neste aparelho.</b> Para salas, desafio do dia, recordes e Minha trilha, um adulto responsável entra com o e-mail.</p><button class="btn" id="abrirConta" ${S.online ? '' : 'disabled'}>Entrar ou criar a conta do responsável</button></div>`}
+    <div class="box perfil-atual">
+      <img src="${fichaSrc(p.ficha)}" alt="">
+      <span class="pa-nome"><b>${esc(p.apelido)}</b><span class="note">${esc(E.NIVEIS[p.nivel] || '')}${S.registrado ? '' : ' · sem conta'}</span></span>
+      <span class="sp"></span>
+      <button class="btn sm" id="trocarPerfil">${S.registrado ? 'Trocar de perfil' : 'Editar'}</button>
     </div>
+    ${!S.registrado && !S.temConta ? `<div class="conta-linha"><p><b>Sem conta, só o jogo sozinho neste aparelho.</b> Para salas, desafio do dia, recordes e Minha trilha, um adulto responsável entra com o e-mail.</p><button class="btn" id="abrirConta" ${S.online ? '' : 'disabled'}>Entrar ou criar a conta do responsável</button></div>` : ''}
+    <label class="f" style="max-width:340px">Duração (jogo sozinho e sala com código)<select id="rodadas">${E.RODADAS_OPCOES.map((n) => `<option value="${n}" ${n === S.rodadas ? 'selected' : ''}>${n} rodadas${n === E.RODADAS_PADRAO ? ' (padrão)' : ''}</option>`).join('')}</select></label>
     <div class="modos">
       <div class="modo" style="--t:var(--c-util)"><h3>Jogar sozinho</h3><p class="note">Contra 3 rivais virtuais, na hora. Funciona mesmo sem internet depois de aberto.</p>
         <button class="btn big primary" id="solo">Jogar sozinho</button>
-        ${salvo ? `<button class="btn" id="continuar" data-modo="${salvo.modo}">${salvo.modo === 'desafio' ? 'Continuar o desafio do dia' : `Continuar partida (rodada ${E.rodadaAtual(salvo.estados.eu)} de ${salvo.estados.eu.rodadas})`}</button>` : ''}</div>
+        ${salvo ? `<button class="btn" id="continuar" data-modo="${salvo.modo}">${salvo.modo === 'desafio' ? 'Continuar o desafio do dia' : `Continuar partida (rodada ${E.rodadaAtual(salvo.estados.eu)} de ${salvo.estados.eu.rodadas})`}</button>` : ''}
+        ${rec ? `<p class="note">Seu recorde: <b>${rec.pontos} pts</b>.</p>` : ''}</div>
       <div class="modo" style="--t:var(--c-agencia)"><h3>Desafio do dia</h3><p class="note">A mesma partida para todo mundo hoje (${dia.split('-').reverse().join('/')}). A primeira tentativa vale para o placar do dia.</p>
         <button class="btn big primary" id="desafio">${jogouHoje ? 'Treinar o desafio de hoje' : 'Jogar o desafio de hoje'}</button>
         ${S.registrado && top.length ? `<p class="note">Placar de hoje: ${top.map((x, i) => `${i + 1}º ${esc(x.apelido)} (${x.pontos})`).join(' · ')}</p>` : ''}</div>
@@ -1240,9 +1261,7 @@ function telaEntrada() {
         <button class="btn big primary" id="fila" ${S.online ? '' : 'disabled'}>Entrar na fila</button></div>
     </div>
     ${S.online ? '' : '<p class="note">Sem conexão com o servidor: as salas ficam indisponíveis, mas você pode jogar sozinho.</p>'}
-    ${rec ? `<p class="note">Seu recorde jogando sozinho: <b>${rec.pontos} pts</b>.</p>` : ''}
     <div class="row minhas"><b>Minhas insígnias</b> ${S.insignias.length ? S.insignias.slice(0, 12).map((i) => seloHtml(i)).join('') : '<span class="note">Nenhuma ainda: jogue uma partida até o fim.</span>'}<button class="btn sm" id="trilha">Minha trilha</button><button class="btn sm" id="recordes" ${S.online ? '' : 'disabled'}>Quadro de recordes</button></div>
-    <details><summary>Recuperar minha conta com o código de 6 palavras</summary><div class="form-linha" style="margin-top:8px"><label class="f">As 6 palavras<input id="palavrasRec" type="text" autocomplete="off" placeholder="onca lobo coruja raposa tucano arara" ${S.online ? '' : 'disabled'}></label><button class="btn" id="recuperar" ${S.online ? '' : 'disabled'}>Recuperar</button></div></details>
     <details><summary>Como funciona cada casa</summary>
       <div class="casas">${casas.map(([k, t]) => `<div class="casa-info" style="--t:var(--c-${k})">${ic(k)}<b>${E.CASAS[k].nome}</b><span>${t}</span></div>`).join('')}</div>
       <p class="note" style="margin-top:10px">Pontos: 10 por item do kit, +20 pelo kit completo, +10 por carta acertada, 1 pt a cada 10 BC que sobrarem, o bônus da meta secreta e o Canivete do leilão. A cada 3 rodadas há um evento, anunciado antes; cada item do kit protege de um revés, e nas últimas rodadas créditos e cartas certas valem em dobro. Antes de rolar, você escolhe: rolar de graça, pagar 5 BC pelo dado duplo ou ajudar no acampamento e ganhar 15 BC. Acertar uma carta de Tempestade evita o revés. Desempate: saldo final, depois cartas acertadas.</p>
@@ -1250,32 +1269,19 @@ function telaEntrada() {
   </div>
   <footer class="wrap rodape"><span class="tb">Um jogo do Trilha HUB</span>${linkHub('entrada', 'Conheça o Trilha HUB')}</footer>`;
 }
-
-function ligarEntrada() {
-  $('#apelido').addEventListener('input', (e) => { S.perfil.apelido = e.target.value; });
-  app.querySelectorAll('[data-ficha]').forEach((b) => b.addEventListener('click', () => {
-    S.perfil.ficha = b.dataset.ficha;
-    app.querySelectorAll('[data-ficha]').forEach((x) => x.setAttribute('aria-checked', x === b));
-    $('#fichaNome').textContent = fichaNome(S.perfil.ficha);
-  }));
+function ligarModos() {
   $('#rodadas').addEventListener('change', (e) => { S.rodadas = Number(e.target.value); });
-  app.querySelectorAll('[data-nivel]').forEach((b) => b.addEventListener('click', () => {
-    S.perfil.nivel = b.dataset.nivel; ls.set('mt-perfil', S.perfil);
-    app.querySelectorAll('[data-nivel]').forEach((x) => x.setAttribute('aria-checked', x === b));
-  }));
+  $('#trocarPerfil').addEventListener('click', () => (S.registrado ? abrirPerfis() : abrirEditorLocal()));
   $('#solo').addEventListener('click', () => jogarSozinho(false));
   $('#continuar')?.addEventListener('click', (e) => jogarSozinho(true, e.currentTarget.dataset.modo));
   $('#desafio').addEventListener('click', jogarDesafio);
   $('#trilha').addEventListener('click', abrirTrilha);
   $('#recordes').addEventListener('click', abrirRecordes);
-  $('#recuperar').addEventListener('click', () => recuperarConta($('#palavrasRec').value));
-  $('#palavrasRec').addEventListener('keydown', (e) => { if (e.key === 'Enter') recuperarConta(e.target.value); });
   $('#entrarCod').addEventListener('click', () => entrarComCodigo($('#codigo').value));
   $('#codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrarComCodigo(e.target.value); });
   $('#criar').addEventListener('click', criarSala);
   $('#fila').addEventListener('click', entrarNaFila);
   $('#abrirConta')?.addEventListener('click', () => abrirConta());
-  $('#trocarPerfil')?.addEventListener('click', () => abrirPerfis());
 }
 
 // ---------- Minha trilha (E3) ----------
@@ -1371,7 +1377,7 @@ function semContaNoAparelho() {
   if (ws) { try { ws.close(); } catch { /* já fechado */ } }
 }
 function ligarTrilha() {
-  $('#voltarTrilha')?.addEventListener('click', () => { S.trilha = null; S.codigoNovo = null; ir('entrada'); });
+  $('#voltarTrilha')?.addEventListener('click', () => { S.trilha = null; S.codigoNovo = null; irMenu(); });
   $('#trilhaConta')?.addEventListener('click', () => abrirConta());
   $('#gerarCodigo')?.addEventListener('click', () => acaoConta(async () => { S.codigoNovo = (await api('/api/recuperacao', {})).palavras; }));
   $('#copiarCodigo')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(S.codigoNovo.join(' ')); toast('Código copiado.'); } catch { toast('Copie as palavras à mão.'); } });
@@ -1426,55 +1432,137 @@ function ligarTrilha() {
 // ---------- Quem vai jogar? (perfis da conta, como num serviço de streaming) ----------
 async function abrirPerfis(pedida = false) {
   if (pedida) toast('Escolha quem vai jogar neste aparelho.');
-  S.novoPerfil = null; ir('perfis');
+  S.editandoPerfis = false; ir('perfis');
   try { aplicarConta(await api('/api/conta')); } catch (e) { toast(e.message); }
   render();
 }
+// Passo 2: escolher o perfil (como num serviço de streaming), criar um novo ou, no modo de edição, abrir o editor.
 function telaPerfis() {
-  const n = S.novoPerfil, cheia = S.perfis.length >= S.maxPerfis;
-  const lista = S.perfis.map((x) => `<button class="perfil-card${x.id === S.perfilId ? ' atual' : ''}" data-perfil="${x.id}"><img src="${fichaSrc(x.ficha)}" alt=""><b>${esc(x.apelido)}</b><span class="note">${esc(E.NIVEIS[x.nivel] || '')}</span>${x.id === S.perfilId ? '<span class="note">neste aparelho</span>' : ''}</button>`).join('');
-  const novo = n ? `<div class="box">
-      <h3>Novo perfil</h3>
-      <label class="f">Apelido<input type="text" id="novoApelido" maxlength="20" autocomplete="off" placeholder="Ex.: Coruja Atenta" value="${esc(n.apelido)}"></label>
-      <div class="fichas" role="radiogroup" aria-label="Fichas">${E.FICHAS.map((f) => `<button type="button" class="ficha-op" role="radio" aria-checked="${n.ficha === f.id}" data-nova-ficha="${f.id}" title="${esc(f.nome)}"><img src="${fichaSrc(f.id)}" alt="${esc(f.nome)}"></button>`).join('')}</div>
-      <div class="stack" style="gap:6px"><span class="f" style="font-weight:600;font-size:.9rem">Nível</span>${nivelHtml(n.nivel, 'data-novo-nivel')}</div>
-      <div class="row"><button class="btn primary" id="criarPerfil">Criar e jogar</button><button class="btn" id="cancelarPerfil">Cancelar</button></div></div>`
-    : cheia ? `<p class="note">A conta já tem ${S.maxPerfis} perfis. Para criar outro, apague um em Minha trilha.</p>`
-      : '<button class="perfil-card novo" id="novoPerfil"><span class="mais" aria-hidden="true">+</span><b>Novo perfil</b></button>';
-  return `${topo(`<span class="chip">Quem vai jogar?</span><span class="sp"></span>${S.registrado ? '<button class="btn sm" id="voltarPerfis">Voltar</button>' : ''}`)}
+  const cheia = S.perfis.length >= S.maxPerfis, ed = S.editandoPerfis;
+  const lista = S.perfis.map((x) => `<button class="perfil-card${!ed && x.id === S.perfilId ? ' atual' : ''}${ed ? ' editando' : ''}" data-perfil="${x.id}">
+      ${ed ? `<span class="editar-ico" aria-hidden="true">${ic('ajustes')}</span>` : ''}
+      <img src="${fichaSrc(x.ficha)}" alt=""><b>${esc(x.apelido)}</b><span class="note">${esc(E.NIVEIS[x.nivel] || '')}</span>
+      ${!ed && x.id === S.perfilId ? '<span class="note">neste aparelho</span>' : ''}</button>`).join('');
+  const novo = ed || cheia ? '' : '<button class="perfil-card novo" id="novoPerfil"><span class="mais" aria-hidden="true">+</span><b>Novo perfil</b></button>';
+  return `${topo(`<span class="chip">Quem vai jogar?</span><span class="sp"></span><button class="btn sm" id="editarPerfis" aria-pressed="${ed}">${ed ? 'Pronto' : 'Editar'}</button>${S.registrado ? '<button class="btn sm" id="voltarPerfis">Voltar</button>' : ''}`)}
   <div class="wrap trilha stack">
-    <h2>Quem vai jogar?</h2>
-    <div class="perfis-grade">${lista}${n || cheia ? '' : novo}</div>
-    ${n || cheia ? novo : ''}
+    <h2>${ed ? 'Qual perfil editar?' : 'Quem vai jogar?'}</h2>
+    <div class="perfis-grade">${lista}${novo}</div>
+    ${!ed && cheia ? `<p class="note">A conta já tem ${S.maxPerfis} perfis. Para criar outro, apague um primeiro (toque em Editar).</p>` : ''}
     <p class="note">Cada criança tem o seu perfil, com histórico, insígnias e quadro de recordes próprios. Perfis diferentes jogam ao mesmo tempo em aparelhos diferentes; o mesmo perfil joga em um aparelho por vez.</p>
+    <div class="row"><button class="btn sm" id="sairContaPerfis">Sair da conta</button></div>
   </div>`;
 }
 function ligarPerfis() {
-  $('#voltarPerfis')?.addEventListener('click', () => ir('entrada'));
+  $('#voltarPerfis')?.addEventListener('click', () => ir('modos'));
+  $('#editarPerfis').addEventListener('click', () => { S.editandoPerfis = !S.editandoPerfis; render(); });
   app.querySelectorAll('[data-perfil]').forEach((b) => b.addEventListener('click', async () => {
+    if (S.editandoPerfis) { abrirEditorExistente(b.dataset.perfil); return; }
     try {
       aplicarConta(await api('/api/perfis/escolher', { id: b.dataset.perfil }));
       toast(`Bom jogo, ${S.perfil.apelido}!`);
       enviarPendentes(); carregarRanking();
-      ir('entrada');
+      ir('modos');
     } catch (e) { toast(e.message); }
   }));
-  $('#novoPerfil')?.addEventListener('click', () => { S.novoPerfil = { apelido: '', ficha: E.FICHAS[0].id, nivel: E.NIVEL_PADRAO }; render(); });
-  $('#cancelarPerfil')?.addEventListener('click', () => { S.novoPerfil = null; render(); });
-  $('#novoApelido')?.addEventListener('input', (e) => { S.novoPerfil.apelido = e.target.value; });
-  app.querySelectorAll('[data-nova-ficha]').forEach((b) => b.addEventListener('click', () => { S.novoPerfil.ficha = b.dataset.novaFicha; render(); $('#novoApelido')?.focus(); }));
-  app.querySelectorAll('[data-novo-nivel]').forEach((b) => b.addEventListener('click', () => {
-    S.novoPerfil.nivel = b.dataset.novoNivel;
-    app.querySelectorAll('[data-novo-nivel]').forEach((x) => x.setAttribute('aria-checked', x === b));
+  $('#novoPerfil')?.addEventListener('click', () => abrirEditorNovo());
+  $('#sairContaPerfis')?.addEventListener('click', async () => {
+    try { await api('/api/conta/sair', {}); semContaNoAparelho(); toast('Este aparelho saiu da conta.'); ir('entrada'); } catch (e) { toast(e.message); }
+  });
+}
+
+// ---------- Novo perfil, editar ou apagar (sem conta: identidade guardada só neste aparelho) ----------
+function abrirEditorLocal() {
+  S.perfilEditor = { modo: 'local', form: { ...S.perfil } };
+  ir('perfilEditor');
+}
+function abrirEditorNovo() {
+  S.perfilEditor = { modo: 'novo', form: { apelido: '', ficha: E.FICHAS[0].id, nivel: E.NIVEL_PADRAO } };
+  ir('perfilEditor');
+}
+async function abrirEditorExistente(id) {
+  const x = S.perfis.find((p) => p.id === id); if (!x) return;
+  try {
+    // Editar pede que o perfil esteja escolhido neste aparelho: é nele que /api/eu grava.
+    aplicarConta(await api('/api/perfis/escolher', { id }));
+  } catch (e) { toast(e.message); return; }
+  S.perfilEditor = { modo: 'editar', id, form: { apelido: x.apelido, ficha: x.ficha, nivel: x.nivel }, pontuacao: x.pontuacao, apagar: false, codigoPerfil: null };
+  ir('perfilEditor');
+}
+function telaPerfilEditor() {
+  const ed = S.perfilEditor, f = ed.form, novo = ed.modo === 'novo', local = ed.modo === 'local';
+  const titulo = local ? 'Quem vai jogar neste aparelho?' : novo ? 'Novo perfil' : 'Editar perfil';
+  const apagarBloco = !local && ed.modo === 'editar' ? (ed.apagar
+    ? confirmarApagarPerfil({ id: ed.id, apelido: f.apelido, pontuacao: ed.pontuacao }, ed)
+    : `<div class="row"><button class="btn sm danger" id="pedirApagarPerfil">Apagar este perfil</button></div>`) : '';
+  return `${topo(`<span class="chip">${titulo}</span><span class="sp"></span><button class="btn sm" id="voltarEditor">Cancelar</button>`)}
+  <div class="wrap trilha stack">
+    <div class="box">
+      <h2>${titulo}</h2>
+      <label class="f">Apelido<input type="text" id="editApelido" maxlength="20" autocomplete="off" placeholder="Ex.: Coruja Atenta" value="${esc(f.apelido)}"></label>
+      <div class="stack" style="gap:6px"><span class="f" style="font-weight:600;font-size:.9rem">Escolha a sua ficha</span>
+        <div class="fichas" role="radiogroup" aria-label="Fichas">${E.FICHAS.map((x) => `<button type="button" class="ficha-op" role="radio" aria-checked="${f.ficha === x.id}" data-ed-ficha="${x.id}" title="${esc(x.nome)}"><img src="${fichaSrc(x.id)}" alt="${esc(x.nome)}"></button>`).join('')}</div>
+        <span class="note" id="editFichaNome">${esc(fichaNome(f.ficha))}</span>
+      </div>
+      <div class="stack" style="gap:6px"><span class="f" style="font-weight:600;font-size:.9rem">Nível</span>${nivelHtml(f.nivel, 'data-ed-nivel')}
+        <span class="note">Define as cartas que saem. Lobinhos leem o texto curto.</span></div>
+      <div class="row"><button class="btn primary" id="salvarEditor">${local ? 'Continuar' : novo ? 'Criar e jogar' : 'Salvar'}</button><button class="btn" id="cancelarEditor">Cancelar</button></div>
+      ${apagarBloco}
+    </div>
+  </div>`;
+}
+function ligarPerfilEditor() {
+  const ed = S.perfilEditor;
+  $('#voltarEditor').addEventListener('click', () => ir(ed.modo === 'local' ? 'entrada' : 'perfis'));
+  $('#cancelarEditor').addEventListener('click', () => ir(ed.modo === 'local' ? 'entrada' : 'perfis'));
+  $('#editApelido').addEventListener('input', (e) => { ed.form.apelido = e.target.value; });
+  app.querySelectorAll('[data-ed-ficha]').forEach((b) => b.addEventListener('click', () => {
+    ed.form.ficha = b.dataset.edFicha;
+    app.querySelectorAll('[data-ed-ficha]').forEach((x) => x.setAttribute('aria-checked', x === b));
+    $('#editFichaNome').textContent = fichaNome(ed.form.ficha);
   }));
-  $('#criarPerfil')?.addEventListener('click', async () => {
+  app.querySelectorAll('[data-ed-nivel]').forEach((b) => b.addEventListener('click', () => {
+    ed.form.nivel = b.dataset.edNivel;
+    app.querySelectorAll('[data-ed-nivel]').forEach((x) => x.setAttribute('aria-checked', x === b));
+  }));
+  $('#salvarEditor').addEventListener('click', async () => {
+    const apelido = ed.form.apelido.trim();
+    if (apelido.length < 2) { toast('Escreva um apelido com pelo menos 2 letras.'); return; }
     try {
-      aplicarConta(await api('/api/perfis', { apelido: S.novoPerfil.apelido, ficha: S.novoPerfil.ficha, nivel: S.novoPerfil.nivel }));
-      S.novoPerfil = null;
-      toast(`Perfil criado. Bom jogo, ${S.perfil.apelido}!`);
-      ir('entrada');
+      if (ed.modo === 'local') {
+        S.perfil = { ...S.perfil, ...ed.form, apelido };
+        ls.set('mt-perfil', S.perfil); ls.set('mt-rodadas', S.rodadas);
+        S.perfilEditor = null; ir('modos'); return;
+      }
+      if (ed.modo === 'novo') {
+        aplicarConta(await api('/api/perfis', { apelido, ficha: ed.form.ficha, nivel: ed.form.nivel }));
+        S.perfilEditor = null;
+        toast(`Perfil criado. Bom jogo, ${S.perfil.apelido}!`);
+        ir('modos'); return;
+      }
+      // editar: o perfil já está escolhido neste aparelho (abrirEditorExistente chamou /api/perfis/escolher)
+      await api('/api/eu', { apelido, ficha: ed.form.ficha, nivel: ed.form.nivel });
+      S.perfil = { ...S.perfil, apelido, ficha: ed.form.ficha, nivel: ed.form.nivel }; ls.set('mt-perfil', S.perfil);
+      S.perfis = S.perfis.map((x) => (x.id === ed.id ? { ...x, apelido, ficha: ed.form.ficha, nivel: ed.form.nivel } : x));
+      S.perfilEditor = null;
+      toast('Perfil salvo.');
+      ir('perfis');
     } catch (e) { toast(e.message); }
   });
+  $('#pedirApagarPerfil')?.addEventListener('click', () => { ed.apagar = true; render(); });
+  $('#apagarPerfilNao')?.addEventListener('click', () => { ed.apagar = false; ed.codigoPerfil = null; render(); });
+  app.querySelectorAll('[data-codigo-perfil]').forEach((b) => b.addEventListener('click', () => acaoConta(async () => {
+    ed.codigoPerfil = (await api('/api/conta/codigo-apagar', { acao: 'apagar_perfil', id: b.dataset.codigoPerfil })).email;
+  }, 'Código enviado ao e-mail da conta.')));
+  app.querySelectorAll('[data-apagar-sim]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const r = await api('/api/perfis/apagar', { id: b.dataset.apagarSim, confirmo: true, codigo: $('#codigoApagarPerfil')?.value });
+      aplicarConta(r);
+      S.perfilEditor = null;
+      toast('O perfil foi apagado.');
+      ir(S.temConta ? 'perfis' : 'entrada');   // apagar o perfil ativo não tira o aparelho da conta: só falta escolher outro
+    } catch (e) { toast(e.message); }
+  }));
 }
 
 // ---------- Entrar ou criar a conta do responsável (e-mail + código) ----------
@@ -1510,7 +1598,7 @@ function telaConta() {
   </div>`;
 }
 function ligarConta() {
-  $('#voltarConta')?.addEventListener('click', () => { S.entrada = null; ir('entrada'); });
+  $('#voltarConta')?.addEventListener('click', () => { S.entrada = null; irMenu(); });
   const enviar = async () => {
     const email = $('#contaEmail').value.trim();
     if (!$('#contaMaior').checked) { toast('Marque que você é um adulto responsável pela criança.'); return; }
@@ -1538,7 +1626,7 @@ function ligarConta() {
       if (!r.perfil) { toast('Conta conectada. Escolha quem vai jogar.'); abrirPerfis(); return; }
       toast(`Conta conectada. Bom jogo, ${r.perfil.apelido}!`);
       enviarPendentes(); carregarRanking();
-      ir('entrada');
+      ir('modos');
     } catch (err) { toast(err.message); }
   };
   $('#contaEntrar')?.addEventListener('click', entrar);
@@ -1561,25 +1649,7 @@ function telaRecordes() {
   return `${topo(`<span class="chip">Quadro de recordes</span><span class="sp"></span>${botaoSom()}${botaoMusica()}<button class="btn sm" id="voltarRecordes">Voltar</button>`)}
   <div class="wrap trilha stack">${corpo}</div>`;
 }
-function ligarRecordes() { $('#voltarRecordes')?.addEventListener('click', () => { S.quadro = null; ir('entrada'); }); }
-
-// ---------- Recuperar a conta com o código de 6 palavras ----------
-async function recuperarConta(texto) {
-  try {
-    const r = await api('/api/recuperar', { palavras: texto });
-    S.online = true;
-    if (!r.jogador) {
-      // jogador de antes da conta do responsável: volta para este aparelho e vira conta quando um adulto entrar
-      S.registrado = false; S.perfil = { ...S.perfil, ...r.semConta }; ls.set('mt-perfil', S.perfil);
-      toast(`Encontramos ${r.semConta.apelido}. Para guardar o histórico de novo, um responsável precisa entrar com o e-mail.`);
-      abrirConta(); return;
-    }
-    aplicarConta(r);
-    toast(`Conta recuperada: bem-vindo de volta, ${r.jogador.apelido}!`);
-    enviarPendentes(); carregarRanking();
-  } catch (e) { toast(e.message); }
-  render();
-}
+function ligarRecordes() { $('#voltarRecordes')?.addEventListener('click', () => { S.quadro = null; irMenu(); }); }
 
 // ---------- Contador anônimo do jogo sozinho (só quantas partidas começaram e terminaram) ----------
 function contar(evento) {
@@ -2273,7 +2343,10 @@ function revancheHtml() {
 
 function telaResultado() {
   const st = eu();
-  if (!st) { S.tela = 'entrada'; return telaEntrada(); }
+  if (!st) {
+    S.tela = (S.registrado || S.perfil.apelido.trim()) ? 'modos' : 'entrada';
+    return S.tela === 'modos' ? telaModos() : telaEntrada();
+  }
   const p = E.pontuacao(st), sala = S.modo === 'sala', r = S.resultado, desafio = !sala && r?.modo === 'desafio';
   const pos = sala ? S.placar.findIndex((x) => x.eu) + 1 : r?.pos || 0;
   const aindaJogando = sala ? S.placar.filter((x) => !x.fim).length : 0;
@@ -2312,7 +2385,7 @@ function telaResultado() {
 }
 
 function ligarResultado() {
-  const voltar = () => { if (S.modo === 'sala') { enviar({ t: 'sair_sala' }); ls.del('mt-sala'); } S.modo = null; S.peaoPos = {}; S.eu = null; S.resultado = null; S.confetou = false; ir('entrada'); };
+  const voltar = () => { if (S.modo === 'sala') { enviar({ t: 'sair_sala' }); ls.del('mt-sala'); } S.modo = null; S.peaoPos = {}; S.eu = null; S.resultado = null; S.confetou = false; irMenu(); };
   $('#inicio')?.addEventListener('click', voltar);
   $('#inicio2')?.addEventListener('click', voltar);
   $('#trilha')?.addEventListener('click', abrirTrilha);
@@ -2333,11 +2406,13 @@ function render() {
   if (S.tela !== 'jogo') for (const id of ['cartaPalco', 'lojaPalco', 'metaPalco', 'jFolha', 'jDecisao', 'jJanela']) $(`#${id}`)?.remove();   // carta, barraca e janelas só existem na tela do jogo
   document.documentElement.classList.toggle('em-jogo', S.tela === 'jogo' && !!eu());   // no jogo a página não rola
   if (S.tela === 'entrada') { app.innerHTML = telaEntrada(); ligarEntrada(); }
+  else if (S.tela === 'modos') { app.innerHTML = telaModos(); ligarModos(); }
   else if (S.tela === 'fila') { app.innerHTML = telaFila(); ligarFila(); }
   else if (S.tela === 'trilha') { app.innerHTML = telaTrilha(); ligarTrilha(); }
   else if (S.tela === 'recordes') { app.innerHTML = telaRecordes(); ligarRecordes(); }
   else if (S.tela === 'conta') { app.innerHTML = telaConta(); ligarConta(); }
   else if (S.tela === 'perfis') { app.innerHTML = telaPerfis(); ligarPerfis(); }
+  else if (S.tela === 'perfilEditor') { app.innerHTML = telaPerfilEditor(); ligarPerfilEditor(); }
   else if (S.tela === 'jogo') {
     const vazio = telaJogo();
     if (vazio) { app.innerHTML = vazio; $('#sair')?.addEventListener('click', sairDoJogo); }

@@ -1,0 +1,46 @@
+# Modo "atrás de proxy" (docker-compose.proxy.yml): outro nginx na frente cuida do HTTPS e repassa para
+# este em HTTP. Mesmas rotas, cabeçalhos e registros do default.conf.template, sem certificado próprio.
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+
+# O IP do visitante chega no X-Forwarded-For do proxy da frente, que alcança este container pela rede do
+# Docker (faixa privada que o Docker escolher). O proxy da frente precisa sobrescrever o cabeçalho (X-Forwarded-For $remote_addr), não somar.
+set_real_ip_from 10.0.0.0/8;
+set_real_ip_from 172.16.0.0/12;
+set_real_ip_from 192.168.0.0/16;
+set_real_ip_from 127.0.0.1;
+real_ip_header X-Forwarded-For;
+
+# Registros de acesso (Marco Civil da Internet, art. 15): IP, data e hora de cada acesso, num arquivo
+# por dia em /var/log/nginx/acesso. O serviço "registros" do docker-compose apaga os de mais de 6 meses.
+map $time_iso8601 $dia_registro { "~^(?<d>\d{4}-\d{2}-\d{2})" $d; default "sem-data"; }
+access_log /var/log/nginx/acesso/acesso-$dia_registro.log combined;
+open_log_file_cache max=4 inactive=1m;
+
+server {
+  listen 80;
+  server_name ${DOMINIO};
+
+  add_header Strict-Transport-Security "max-age=31536000" always;
+  add_header X-Content-Type-Options nosniff always;
+  add_header Referrer-Policy strict-origin-when-cross-origin always;
+  add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' wss://${DOMINIO}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+
+  gzip on;
+  gzip_types text/css application/javascript image/svg+xml application/json;
+
+  root /usr/share/nginx/html;
+  location / { try_files $uri $uri/ /index.html; expires -1; }
+  location /img/ { expires 1d; }
+
+  location /api/ { proxy_pass http://app:3000; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $remote_addr; proxy_set_header X-Forwarded-Proto https; }
+  location /r/   { proxy_pass http://app:3000; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $remote_addr; }
+  location /ws {
+    proxy_pass http://app:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_read_timeout 120s;
+  }
+}
