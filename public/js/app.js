@@ -1150,6 +1150,7 @@ function sairDoJogo() {
   if (S.modo === 'sala') { enviar({ t: 'sair_sala' }); ls.del('mt-sala'); }
   S.modo = null; S.sala = null; S.eu = null; S.placar = []; S.mural = []; S.pontes = {}; S.peaoPos = {}; pendentes.length = 0;
   irMenu();
+  if (guardaVoltar) history.back();   // tira a entrada do jogo: no menu, o voltar volta a sair do site
 }
 
 // ---------- Chamas do Fogo de Conselho ----------
@@ -2157,6 +2158,26 @@ function abrirSair() {
   $('#jSairSim').addEventListener('click', () => { jFechar(); sairDoJogo(); });
 }
 
+// ----- Botão voltar do celular: no jogo, fecha o que estiver aberto ou pergunta antes de sair -----
+// O jogo guarda uma entrada própria no histórico. O Chrome do Android pula entradas criadas sem toque do
+// jogador, por isso ela é refeita no próximo toque, e não logo depois do voltar.
+let guardaVoltar = false;
+function guardarVoltar() {
+  if (guardaVoltar || S.tela !== 'jogo' || !eu()) return;
+  history.pushState({ mtJogo: true }, '');
+  guardaVoltar = true;
+}
+window.addEventListener('popstate', () => {
+  guardaVoltar = false;
+  if (S.tela !== 'jogo' || !eu()) return;
+  const folha = $('#jFolha');
+  if (folha && !folha.dataset.fecha) return;   // folha que exige resposta continua na tela
+  if (folha || $('#fichaModal, #cartaPalco, #lojaPalco') || $('#jAmigos')?.hidden === false) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  } else abrirSair();
+});
+document.addEventListener('pointerdown', guardarVoltar, true);
+
 // ----- Tamanho do tabuleiro: o maior quadrado que cabe no miolo da tela -----
 function ajustarJogo() {
   const palco = $('#jPalco'), tab = $('#board'), acoes = $('#jAcoes'); if (!palco || !tab || !acoes) return;
@@ -2209,7 +2230,7 @@ function montarJogo() {
           <button class="j-mini" id="bComo" type="button" aria-label="Como jogar a sua vez">?</button>
           <button class="j-mini" id="bAjustes" type="button" aria-label="Ajustes de som e música">${ic('ajustes')}</button>
           ${sala ? `<button class="j-mini" id="bSala" type="button" aria-label="Sala e anfitrião">${ic('sala')}</button>` : ''}
-          <button class="j-mini sai" id="bSair" type="button" aria-label="Sair do jogo">${ic('sair')}</button>
+          <button class="j-mini sai" id="bSair" type="button" aria-label="Sair do jogo">${ic('sair')}<span>Sair</span></button>
         </div>
       </div>
     </main>
@@ -2229,7 +2250,7 @@ function atualizarJogo() {
   const st = eu();
   if (S.tela !== 'jogo' || !st) return;
   const nova = !$('#board');
-  if (nova) { app.innerHTML = montarJogo(); S.peaoPos = {}; ligarFixos(); }
+  if (nova) { app.innerHTML = montarJogo(); S.peaoPos = {}; ligarFixos(); guardarVoltar(); }
   atualizarTopo(st); atualizarKit(st); atualizarFaixas();
   atualizarPainel();
   atualizarCasas(st); atualizarNota(st); atualizarPontes();
