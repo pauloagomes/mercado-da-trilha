@@ -709,6 +709,8 @@ html.em-jogo, html.em-jogo body { height: 100%; overflow: hidden; overscroll-beh
 .j-palco.curta .j-acao svg.ic, .j-palco.curta .j-acao.um svg.ic { font-size: 30px; }
 .j-palco.curta .j-minis { grid-template-columns: repeat(4, 30px); gap: 5px; }
 .j-palco.curta .j-mini { width: 30px; height: 30px; }
+/* Sair ocupa a linha inteira e tem nome escrito: só o ícone passava despercebido. */
+.j-minis .j-mini.sai { grid-column: 1 / -1; width: auto; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 10px; border-radius: 999px; font-size: .78rem; }
 
 /* Faixas que aproveitam o espaço livre: acontecimentos, missão e reações */
 .j-lateral { display: contents; }
