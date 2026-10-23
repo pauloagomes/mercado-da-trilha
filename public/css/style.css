@@ -425,7 +425,7 @@ label.check input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; acce
 
 /* Perfis da conta (como num serviço de streaming) */
 .perfis-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
-.perfil-card { display: grid; justify-items: center; align-content: start; gap: 8px; padding: 16px 10px 14px; background: var(--panel); border: 2px solid var(--line); border-radius: 16px; text-align: center; transition: transform .15s, border-color .15s; }
+.perfil-card { position: relative; display: grid; justify-items: center; align-content: start; gap: 8px; padding: 16px 10px 14px; background: var(--panel); border: 2px solid var(--line); border-radius: 16px; text-align: center; transition: transform .15s, border-color .15s; }
 .perfil-card img { width: 72px; height: 72px; border-radius: 50%; }
 .perfil-card b { font-size: 1rem; overflow-wrap: anywhere; }
 .perfil-card .note { font-size: .75rem; }
@@ -433,6 +433,19 @@ label.check input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; acce
 .perfil-card:hover, .perfil-card:focus-visible { transform: translateY(-2px); border-color: var(--sun); }
 .perfil-card.novo { border-style: dashed; color: var(--muted); }
 .perfil-card .mais { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; font-size: 2.2rem; font-weight: 300; background: var(--panel2); }
+.perfil-card.editando { border-style: dashed; }
+.perfil-card .editar-ico { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--sun); color: var(--on-sun); box-shadow: 0 2px 4px rgba(0, 0, 0, .25); }
+.perfil-card .editar-ico svg { width: 15px; height: 15px; }
+
+/* Perfil atual, no topo de "como vai jogar?" */
+.perfil-atual { display: flex; align-items: center; gap: 10px; }
+.perfil-atual img { width: 48px; height: 48px; border-radius: 50%; flex: none; border: 2px solid var(--sun); }
+.perfil-atual .pa-nome { display: grid; line-height: 1.2; min-width: 0; }
+.perfil-atual .sp { flex: 1; }
+
+/* Divisor "ou" entre entrar com conta e jogar sem conta */
+.ou-sep { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .82rem; }
+.ou-sep span { flex: 1; height: 1px; background: var(--line); }
 .perfis-lista { display: grid; gap: 8px; }
 .perfil-linha { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .perfil-linha img { width: 34px; height: 34px; border-radius: 50%; }
