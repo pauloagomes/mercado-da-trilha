@@ -1,0 +1,33 @@
+version: 2
+
+# Monitoramento de dependências (mesmo padrão do Trilha HUB, SEC-DEP-002 da RFC-SEC-001).
+# Os alertas e os PRs de correção de segurança do Dependabot são imediatos e não dependem
+# deste arquivo (ligados em Settings > Code security). Aqui ficam só as atualizações de
+# versão, semanais e agrupadas para não virar um PR por pacote.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Imagem base dos Dockerfiles. A versão major do Node só muda por decisão nossa (LTS).
+  - package-ecosystem: docker
+    directories:
+      - "/"
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

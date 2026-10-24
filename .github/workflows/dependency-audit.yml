@@ -1,0 +1,30 @@
+name: Auditoria de dependências
+
+# Mesmo padrão do Trilha HUB (SEC-DEP-002, RFC-SEC-001): a cada push/PR no main e todo dia às
+# 03h (BRT). Só as dependências de produção (--omit=dev) barram; as de desenvolvimento
+# continuam aparecendo nos alertas do Dependabot. O npm audit lê só o package-lock.json, então
+# não precisa instalar nada.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: npm audit (produção, bloqueia em Alta/Crítica)
+        run: npm audit --omit=dev --audit-level=high
