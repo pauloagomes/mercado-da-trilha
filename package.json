@@ -19,12 +19,12 @@
     "migrate": "node server/migrate.js"
   },
   "dependencies": {
-    "@fastify/cookie": "^11.0.2",
+    "@fastify/cookie": "^11.1.5",
     "@fastify/rate-limit": "^10.2.2",
-    "@fastify/static": "^10.1.6",
+    "@fastify/static": "^10.1.8",
     "@fastify/websocket": "^11.0.2",
     "fastify": "^5.2.1",
-    "nodemailer": "^10.2.0",
+    "nodemailer": "^10.2.1",
     "pg": "^8.13.3"
   },
   "devDependencies": {
